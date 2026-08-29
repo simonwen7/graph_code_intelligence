@@ -5,6 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from codeintel.models import AnalysisResult
+
 
 class LanguageAdapter(ABC):
     """Common interface implemented by each supported programming language."""
@@ -22,3 +24,12 @@ class LanguageAdapter(ABC):
     def supports_file(self, path: Path) -> bool:
         """Return whether this adapter supports the supplied source file."""
         return path.suffix.lower() in self.file_extensions
+
+    @abstractmethod
+    def analyze_file(
+        self,
+        path: Path,
+        *,
+        repository_root: Path | None = None,
+    ) -> AnalysisResult:
+        """Analyze a source file and return language-neutral semantic units."""

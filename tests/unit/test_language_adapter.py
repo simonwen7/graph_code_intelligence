@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from codeintel.languages.base import LanguageAdapter
+from codeintel.models import AnalysisResult
 
 
 class ExampleLanguageAdapter(LanguageAdapter):
@@ -15,6 +16,22 @@ class ExampleLanguageAdapter(LanguageAdapter):
     @property
     def file_extensions(self) -> frozenset[str]:
         return frozenset({".example"})
+
+    def analyze_file(
+        self,
+        path: Path,
+        *,
+        repository_root: Path | None = None,
+    ) -> AnalysisResult:
+        del repository_root
+        return AnalysisResult(
+            path=path,
+            language_id=self.language_id,
+            module_name=path.stem,
+            symbols=(),
+            code_units=(),
+            has_syntax_errors=False,
+        )
 
 
 def test_supports_known_file_extension() -> None:

@@ -57,30 +57,34 @@ flowchart TD
 
 ## Current Status
 
-The project is at **Milestone 0 — Repository/Foundation**.
+The project is at **Milestone 1 — Python Parsing + Semantic Units**.
 
 Verified capabilities today:
 
 - Python 3.14 project managed with [uv](https://docs.astral.sh/uv/)
 - `src/`-layout Python package (`codeintel`)
-- Typer CLI skeleton with `aicode version`
-- `LanguageAdapter` architectural boundary for future language-specific parsers
+- Typer CLI with `aicode version` and `aicode inspect`
+- Tree-sitter Python parsing isolated behind a thin parser wrapper
+- `PythonAdapter` semantic extraction into language-neutral `Symbol` and `CodeUnit` models
+- Deterministic module-name derivation and source-file discovery
+- Fixture-backed parser and adapter tests
 - Unit tests with pytest
 - Linting and formatting with Ruff
 - Strict static typing with mypy
-- GitHub Actions CI workflow (configured locally; runs on GitHub after push)
+- GitHub Actions CI on push and pull request
 
-Parsing, indexing, retrieval, graph construction, and LLM integration are not implemented yet.
+Relationship graphs, persistence, retrieval, embeddings, and LLM integration are not implemented yet.
 
 ## Current Capabilities
 
-### CLI foundation
+### CLI
 
 Commands currently available:
 
 ```bash
 uv run aicode --help
 uv run aicode version
+uv run aicode inspect PATH
 ```
 
 Expected version output:
@@ -89,15 +93,24 @@ Expected version output:
 aicode 0.1.0
 ```
 
-### Language adapter foundation
+`aicode inspect` accepts a Python file or a directory. It discovers supported files, analyzes each through `PythonAdapter`, and prints module names, syntax-error status, Symbols, and CodeUnit summaries.
 
-`LanguageAdapter` (`src/codeintel/languages/base.py`) establishes the boundary for future language-specific adapters. It currently defines:
+### Language adapter and semantic extraction
 
-- **language identifier** — canonical language name
-- **supported file extensions** — set of recognized suffixes
-- **file-support detection** — `supports_file(path)` checks whether a path suffix is supported
+`LanguageAdapter` defines language identity, supported extensions, file-support detection, and `analyze_file(...)`.
 
-Parsing and semantic extraction of code units are planned for Milestone 1. No parser is wired in yet.
+`PythonAdapter` currently extracts:
+
+- module, class, function, and method Symbols
+- nested functions (classified as `FUNCTION`, not `METHOD`)
+- decorated and async definitions
+- declaration signatures
+- exact source spans and CodeUnit text (no MODULE CodeUnits)
+- `has_syntax_errors` for malformed Python without crashing analysis
+
+Tree-sitter `Tree` / `Node` objects do not leak into the semantic models or CLI output.
+
+Import resolution, call graphs, and inheritance relationships are out of scope for this milestone.
 
 ## Technology Stack
 
@@ -108,7 +121,9 @@ Parsing and semantic extraction of code units are planned for Milestone 1. No pa
 | Python 3.14 | Runtime |
 | uv | Dependency and environment management |
 | Typer | CLI framework |
-| pytest | Unit testing |
+| Tree-sitter | Python syntax parsing |
+| tree-sitter-python | Python grammar |
+| pytest | Unit and integration testing |
 | Ruff | Linting and formatting |
 | mypy | Strict static type checking |
 | Hatchling | Package build backend |
@@ -119,7 +134,6 @@ Parsing and semantic extraction of code units are planned for Milestone 1. No pa
 
 | Technology | Planned role |
 |------------|--------------|
-| Tree-sitter | Multi-language parsing |
 | SQLite / FTS5 | Lexical index and metadata persistence |
 | FAISS | Dense vector index |
 | Code/text embedding model | Semantic retrieval |
@@ -137,13 +151,26 @@ graph_code_intelligence/
 │   └── codeintel/
 │       ├── __init__.py
 │       ├── cli.py
+│       ├── discovery.py
+│       ├── models.py
 │       └── languages/
 │           ├── __init__.py
-│           └── base.py
+│           ├── base.py
+│           └── python/
+│               ├── __init__.py
+│               ├── adapter.py
+│               └── parser.py
 ├── tests/
+│   ├── fixtures/
+│   │   └── python_repo/
+│   ├── integration/
+│   │   └── test_inspect_cli.py
 │   └── unit/
 │       ├── test_cli.py
-│       └── test_language_adapter.py
+│       ├── test_discovery.py
+│       ├── test_language_adapter.py
+│       ├── test_python_adapter.py
+│       └── test_python_parser.py
 ├── .gitignore
 ├── .python-version
 ├── LICENSE
@@ -182,12 +209,19 @@ Do not manually `pip install` packages into the environment.
 ```bash
 uv run aicode --help
 uv run aicode version
+uv run aicode inspect PATH
 ```
 
 Expected version output:
 
 ```text
 aicode 0.1.0
+```
+
+Example inspection of the fixture repository:
+
+```bash
+uv run aicode inspect tests/fixtures/python_repo
 ```
 
 ## Testing and Code Quality
@@ -198,7 +232,7 @@ Run each check independently:
 uv run pytest
 ```
 
-Runs the unit test suite and verifies CLI and adapter foundation behavior.
+Runs the unit and integration test suites, including Python parsing fixtures and CLI inspect behavior.
 
 ```bash
 uv run ruff check .
@@ -228,14 +262,14 @@ The workflow at `.github/workflows/ci.yml` validates on every push and pull requ
 - Ruff format check
 - mypy
 
-The workflow is configured locally and will run on GitHub after the repository is pushed. It has not executed on GitHub yet.
+The workflow is configured in this repository and runs on GitHub for pushes and pull requests against the published project remote.
 
 ## Roadmap
 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
-| 0 | Repository Foundation | **Current** |
-| 1 | Python Parsing + Semantic Code Units | Planned |
+| 0 | Repository Foundation | Complete |
+| 1 | Python Parsing + Semantic Code Units | **Current** |
 | 2 | Static Relationships + Code Graph | Planned |
 | 3 | Persistence and Repository Index | Planned |
 | 4 | Lexical Retrieval Baseline | Planned |
