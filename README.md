@@ -34,7 +34,7 @@ The planned evaluation compares retrieval strategies along an ablation ladder:
 4. **Hybrid + Code Graph** — graph expansion over static relationships between symbols and files
 5. **Hybrid + Graph + Structured Reranking + Context Compilation** — full engine with token-budget-aware context assembly
 
-This ladder is the planned ablation and evaluation direction. None of the retrieval or graph stages beyond the foundation boundary are implemented yet.
+This ladder is the planned ablation and evaluation direction. Lexical, dense, and hybrid retrieval are not implemented yet. An in-memory static CodeGraph exists as of Milestone 2; it is not yet used for retrieval ranking.
 
 ## Target Architecture
 
@@ -57,23 +57,27 @@ flowchart TD
 
 ## Current Status
 
-The project is at **Milestone 1 — Python Parsing + Semantic Units**.
+The project is at **Milestone 2 — Static Relationships & Code Graph**.
 
 Verified capabilities today:
 
 - Python 3.14 project managed with [uv](https://docs.astral.sh/uv/)
 - `src/`-layout Python package (`codeintel`)
-- Typer CLI with `aicode version` and `aicode inspect`
+- Typer CLI with `aicode version`, `aicode inspect`, and `aicode graph`
 - Tree-sitter Python parsing isolated behind a thin parser wrapper
 - `PythonAdapter` semantic extraction into language-neutral `Symbol` and `CodeUnit` models
+- Repository-level symbol indexing and duplicate qualified-name detection
+- Static `CONTAINS`, `IMPORTS`, `REFERENCES`, `CALLS`, and `INHERITS` relations
+- Conservative Python lexical-scope analysis with `RESOLVED` / `PROBABLE` / `UNRESOLVED` status
+- In-memory `CodeGraph` with incoming/outgoing adjacency, filtering, bounded BFS, and shortest distance
 - Deterministic module-name derivation and source-file discovery
-- Fixture-backed parser and adapter tests
+- Fixture-backed parser, relation, graph, and CLI tests
 - Unit tests with pytest
 - Linting and formatting with Ruff
 - Strict static typing with mypy
 - GitHub Actions CI on push and pull request
 
-Relationship graphs, persistence, retrieval, embeddings, and LLM integration are not implemented yet.
+Persistence, retrieval, embeddings, and LLM integration are not implemented yet.
 
 ## Current Capabilities
 
@@ -85,6 +89,8 @@ Commands currently available:
 uv run aicode --help
 uv run aicode version
 uv run aicode inspect PATH
+uv run aicode graph PATH
+uv run aicode graph PATH --symbol QUALIFIED_NAME
 ```
 
 Expected version output:
@@ -94,6 +100,8 @@ aicode 0.1.0
 ```
 
 `aicode inspect` accepts a Python file or a directory. It discovers supported files, analyzes each through `PythonAdapter`, and prints module names, syntax-error status, Symbols, and CodeUnit summaries.
+
+`aicode graph` expects a **repository directory**. It builds a repository-level symbol index and in-memory CodeGraph, then prints relation summaries. `--symbol` shows incoming and outgoing edges for one qualified name.
 
 ### Language adapter and semantic extraction
 
@@ -110,7 +118,31 @@ aicode 0.1.0
 
 Tree-sitter `Tree` / `Node` objects do not leak into the semantic models or CLI output.
 
-Import resolution, call graphs, and inheritance relationships are out of scope for this milestone.
+### Static relationships and CodeGraph
+
+Repository analysis discovers Python files, runs Milestone 1 extraction, then builds a qualified-name symbol index **before** cross-file relation resolution.
+
+Implemented relation kinds:
+
+- **CONTAINS** — derived from existing Symbol parent links (`RESOLVED`)
+- **IMPORTS** — module-level import edges; repo-local names resolve, stdlib/third-party stay `UNRESOLVED`
+- **CALLS** — conservative lexical / import / `self` / `cls` call edges
+- **REFERENCES** — only when a use maps to a concrete repository Symbol; unknown locals/builtins are omitted
+- **INHERITS** — class base expressions, including multiple bases
+
+`DEFINES` is **not** emitted. With a Symbol-only graph it would duplicate `CONTAINS` without distinct semantics. It is deferred until binding/file-level definition modeling exists.
+
+Resolution is intentionally conservative:
+
+- same-module and imported callees may be `RESOLVED`
+- `self.method()` / `cls.method()` / `KnownClass.method()` are `PROBABLE` because of Python dynamic dispatch
+- inherited methods are not followed through MRO; `self.base_method()` stays `UNRESOLVED` unless that method is declared on the current class
+- star imports remain `UNRESOLVED` and do not bind names
+- assignment aliases, `global` / `nonlocal`, runtime imports, `getattr`, and monkeypatching are not modeled
+- there is no type inference and no execution of analyzed code
+- each Python file is parsed twice by design (symbol extraction, then relations)
+
+The in-memory CodeGraph uses `Symbol.qualified_name` as node identity. Unresolved relations are stored but do not create fake target nodes or participate in distance traversal.
 
 ## Technology Stack
 
@@ -152,25 +184,34 @@ graph_code_intelligence/
 │       ├── __init__.py
 │       ├── cli.py
 │       ├── discovery.py
+│       ├── graph.py
 │       ├── models.py
+│       ├── repository.py
 │       └── languages/
 │           ├── __init__.py
 │           ├── base.py
 │           └── python/
 │               ├── __init__.py
 │               ├── adapter.py
-│               └── parser.py
+│               ├── parser.py
+│               └── relations.py
 ├── tests/
 │   ├── fixtures/
+│   │   ├── python_graph/
 │   │   └── python_repo/
 │   ├── integration/
+│   │   ├── test_graph_cli.py
 │   │   └── test_inspect_cli.py
 │   └── unit/
 │       ├── test_cli.py
 │       ├── test_discovery.py
+│       ├── test_graph.py
 │       ├── test_language_adapter.py
+│       ├── test_models.py
 │       ├── test_python_adapter.py
-│       └── test_python_parser.py
+│       ├── test_python_parser.py
+│       ├── test_python_relations.py
+│       └── test_repository.py
 ├── .gitignore
 ├── .python-version
 ├── LICENSE
@@ -210,6 +251,8 @@ Do not manually `pip install` packages into the environment.
 uv run aicode --help
 uv run aicode version
 uv run aicode inspect PATH
+uv run aicode graph PATH
+uv run aicode graph PATH --symbol QUALIFIED_NAME
 ```
 
 Expected version output:
@@ -218,10 +261,17 @@ Expected version output:
 aicode 0.1.0
 ```
 
-Example inspection of the fixture repository:
+Example inspection of the parser fixture repository:
 
 ```bash
 uv run aicode inspect tests/fixtures/python_repo
+```
+
+Example graph inspection:
+
+```bash
+uv run aicode graph tests/fixtures/python_graph
+uv run aicode graph tests/fixtures/python_graph --symbol service.Service
 ```
 
 ## Testing and Code Quality
@@ -232,7 +282,7 @@ Run each check independently:
 uv run pytest
 ```
 
-Runs the unit and integration test suites, including Python parsing fixtures and CLI inspect behavior.
+Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, and CLI inspect/graph behavior.
 
 ```bash
 uv run ruff check .
@@ -269,8 +319,8 @@ The workflow is configured in this repository and runs on GitHub for pushes and 
 | Milestone | Scope | Status |
 |-----------|-------|--------|
 | 0 | Repository Foundation | Complete |
-| 1 | Python Parsing + Semantic Code Units | **Current** |
-| 2 | Static Relationships + Code Graph | Planned |
+| 1 | Python Parsing + Semantic Code Units | Complete |
+| 2 | Static Relationships + Code Graph | **Current** |
 | 3 | Persistence and Repository Index | Planned |
 | 4 | Lexical Retrieval Baseline | Planned |
 | 5 | Dense Retrieval | Planned |

@@ -72,3 +72,42 @@ class AnalysisResult:
     symbols: tuple[Symbol, ...]
     code_units: tuple[CodeUnit, ...]
     has_syntax_errors: bool
+
+
+class RelationKind(StrEnum):
+    """Kinds of static relationships between program symbols."""
+
+    CONTAINS = "contains"
+    IMPORTS = "imports"
+    REFERENCES = "references"
+    CALLS = "calls"
+    INHERITS = "inherits"
+
+
+class ResolutionStatus(StrEnum):
+    """Honesty level for static resolution of a relationship target."""
+
+    RESOLVED = "resolved"
+    PROBABLE = "probable"
+    UNRESOLVED = "unresolved"
+
+
+@dataclass(frozen=True, slots=True)
+class Relation:
+    """A directed static relationship originating in a source file."""
+
+    kind: RelationKind
+    source_qualified_name: str
+    target_qualified_name: str | None
+    target_text: str
+    resolution: ResolutionStatus
+    path: Path
+    span: SourceSpan | None
+
+    def __post_init__(self) -> None:
+        if self.resolution in {ResolutionStatus.RESOLVED, ResolutionStatus.PROBABLE}:
+            if self.target_qualified_name is None:
+                raise ValueError(f"{self.resolution.value} relations require target_qualified_name")
+        elif self.resolution is ResolutionStatus.UNRESOLVED:
+            if self.target_qualified_name is not None:
+                raise ValueError("unresolved relations must not fabricate a target qualified name")
