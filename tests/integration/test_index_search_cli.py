@@ -17,7 +17,7 @@ runner = CliRunner()
 def test_help_lists_index_and_search() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("version", "inspect", "graph", "index", "search"):
+    for command in ("version", "inspect", "graph", "index", "embed", "search"):
         assert command in result.stdout
 
 
@@ -91,6 +91,30 @@ def test_search_before_index_fails_cleanly(tmp_path: Path) -> None:
     combined = f"{result.stdout}\n{result.stderr}"
     assert "index database does not exist" in combined
     assert "aicode index" in combined
+
+
+def test_default_mode_matches_explicit_lexical(tmp_path: Path) -> None:
+    db_path = tmp_path / "index.db"
+    assert runner.invoke(app, ["index", str(SEARCH_ROOT), "--db", str(db_path)]).exit_code == 0
+    default = runner.invoke(
+        app,
+        ["search", str(SEARCH_ROOT), "authorize_payment", "--db", str(db_path)],
+    )
+    explicit = runner.invoke(
+        app,
+        [
+            "search",
+            str(SEARCH_ROOT),
+            "authorize_payment",
+            "--db",
+            str(db_path),
+            "--mode",
+            "lexical",
+        ],
+    )
+    assert default.exit_code == 0
+    assert explicit.exit_code == 0
+    assert default.stdout == explicit.stdout
 
 
 def test_index_rejects_missing_and_file_paths(tmp_path: Path) -> None:

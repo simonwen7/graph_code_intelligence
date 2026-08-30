@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 from collections import Counter
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from codeintel import __version__
+from codeintel.dense import (
+    DenseIndexError,
+    DenseIndexMismatchError,
+    DenseIndexMissingError,
+    build_dense_index,
+    default_dense_dir,
+)
 from codeintel.discovery import discover_source_files
+from codeintel.embeddings import (
+    DEFAULT_MODEL_ID,
+    EmbeddingDependencyError,
+    create_embedding_provider,
+)
 from codeintel.graph import CodeGraph
+from codeintel.hybrid import search_hybrid
 from codeintel.languages.python import PythonAdapter, PythonRelationExtractor
 from codeintel.lexical import search_code_units
 from codeintel.models import AnalysisResult, Relation, SearchResult, SymbolKind
@@ -27,6 +41,14 @@ app = typer.Typer(
     help="Graph-Augmented Code Intelligence Engine.",
     no_args_is_help=True,
 )
+
+
+class SearchMode(StrEnum):
+    """Retrieval mode for ``aicode search``."""
+
+    LEXICAL = "lexical"
+    DENSE = "dense"
+    HYBRID = "hybrid"
 
 
 @app.callback()
@@ -133,6 +155,66 @@ def index_command(
     typer.echo(f"fts_documents: {stats.fts_documents}")
 
 
+@app.command("embed")
+def embed_command(
+    path: Path,
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="SQLite index path (default: PATH/.codeintel/index.db)."),
+    ] = None,
+    dense_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--dense-dir",
+            help="Dense artifact directory (default: PATH/.codeintel/dense/).",
+        ),
+    ] = None,
+    model: Annotated[
+        str,
+        typer.Option("--model", help="Embedding model id for the Sentence Transformers provider."),
+    ] = DEFAULT_MODEL_ID,
+) -> None:
+    """Build a dense FAISS artifact from an existing SQLite index."""
+    if not path.exists():
+        typer.echo(f"Error: path does not exist: {path}", err=True)
+        raise typer.Exit(code=1)
+    if not path.is_dir():
+        typer.echo("Error: embed expects a repository directory, not a file.", err=True)
+        raise typer.Exit(code=1)
+
+    database_path = db if db is not None else default_index_path(path)
+    artifact_dir = dense_dir if dense_dir is not None else default_dense_dir(path)
+    if not database_path.exists():
+        typer.echo(
+            f"Error: index database does not exist: {database_path}\n"
+            f"Run `aicode index {path}` first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        provider = create_embedding_provider(model)
+        with IndexDatabase(database_path, create=False) as database:
+            stats = build_dense_index(database, provider, artifact_dir=artifact_dir)
+    except EmbeddingDependencyError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except SchemaVersionError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except (IndexDatabaseError, DenseIndexError, OSError, ValueError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"database: {database_path}")
+    typer.echo(f"dense_dir: {stats.artifact_dir}")
+    typer.echo(f"provider: {stats.provider_id}")
+    typer.echo(f"model: {stats.model_id}")
+    typer.echo(f"documents: {stats.document_count}")
+    typer.echo(f"dimension: {stats.dimension}")
+    typer.echo(f"corpus_fingerprint: {stats.corpus_fingerprint}")
+
+
 @app.command("search")
 def search_command(
     path: Path,
@@ -141,6 +223,17 @@ def search_command(
         Path | None,
         typer.Option("--db", help="SQLite index path (default: PATH/.codeintel/index.db)."),
     ] = None,
+    dense_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--dense-dir",
+            help="Dense artifact directory (default: PATH/.codeintel/dense/).",
+        ),
+    ] = None,
+    mode: Annotated[
+        SearchMode,
+        typer.Option("--mode", help="Retrieval mode: lexical, dense, or hybrid."),
+    ] = SearchMode.LEXICAL,
     limit: Annotated[int, typer.Option("--limit", min=1, help="Maximum number of results.")] = 10,
     kind: Annotated[
         str | None,
@@ -167,6 +260,7 @@ def search_command(
         raise typer.Exit(code=0)
 
     database_path = db if db is not None else default_index_path(path)
+    artifact_dir = dense_dir if dense_dir is not None else default_dense_dir(path)
     if not database_path.exists():
         typer.echo(
             f"Error: index database does not exist: {database_path}\n"
@@ -188,13 +282,36 @@ def search_command(
 
     try:
         with IndexDatabase(database_path, create=False) as database:
-            results = search_code_units(
-                database,
-                query,
-                limit=limit,
-                kind=symbol_kind,
-                path_prefix=path_prefix,
-            )
+            if mode is SearchMode.LEXICAL:
+                results = search_code_units(
+                    database,
+                    query,
+                    limit=limit,
+                    kind=symbol_kind,
+                    path_prefix=path_prefix,
+                )
+            else:
+                results = _search_with_embeddings(
+                    database,
+                    query,
+                    mode=mode,
+                    artifact_dir=artifact_dir,
+                    limit=limit,
+                    kind=symbol_kind,
+                    path_prefix=path_prefix,
+                )
+    except EmbeddingDependencyError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except DenseIndexMissingError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except DenseIndexMismatchError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except DenseIndexError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except SchemaVersionError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -211,6 +328,54 @@ def search_command(
 
     for rank, result in enumerate(results, start=1):
         _print_search_result(rank, result)
+
+
+def _search_with_embeddings(
+    database: IndexDatabase,
+    query: str,
+    *,
+    mode: SearchMode,
+    artifact_dir: Path,
+    limit: int,
+    kind: SymbolKind | None,
+    path_prefix: str | None,
+) -> tuple[SearchResult, ...]:
+    import json
+
+    from codeintel.dense import search_dense as dense_search
+
+    metadata_path = artifact_dir / "metadata.json"
+    if not metadata_path.is_file():
+        raise DenseIndexMissingError(
+            f"Dense artifact is missing under {artifact_dir}. Run `aicode embed` to build it."
+        )
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DenseIndexError(f"Corrupt dense metadata at {metadata_path}") from exc
+    if not isinstance(metadata, dict) or "model_id" not in metadata:
+        raise DenseIndexError(f"Corrupt dense metadata at {metadata_path}")
+
+    provider = create_embedding_provider(str(metadata["model_id"]))
+    if mode is SearchMode.DENSE:
+        return dense_search(
+            database,
+            provider,
+            query,
+            artifact_dir=artifact_dir,
+            limit=limit,
+            kind=kind,
+            path_prefix=path_prefix,
+        )
+    return search_hybrid(
+        database,
+        provider,
+        query,
+        artifact_dir=artifact_dir,
+        limit=limit,
+        kind=kind,
+        path_prefix=path_prefix,
+    )
 
 
 def _print_search_result(rank: int, result: SearchResult) -> None:

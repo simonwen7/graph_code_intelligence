@@ -115,9 +115,12 @@ class Relation:
 
 @dataclass(frozen=True, slots=True)
 class SearchResult:
-    """A lexical retrieval hit over a persisted CodeUnit snapshot.
+    """A retrieval hit over a persisted CodeUnit snapshot.
 
-    ``score`` is higher-is-better: ``score = -raw_sqlite_bm25``.
+    ``score`` is always higher-is-better within the retrieval method that
+    produced the result (lexical BM25 uses ``-raw_sqlite_bm25``, dense uses
+    cosine similarity, hybrid uses RRF). Scores are not probabilities and are
+    not comparable across retrieval modes.
     """
 
     symbol_qualified_name: str
