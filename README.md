@@ -34,7 +34,7 @@ The planned evaluation compares retrieval strategies along an ablation ladder:
 4. **Hybrid + Code Graph** — graph expansion over static relationships between symbols and files
 5. **Hybrid + Graph + Structured Reranking + Context Compilation** — full engine with token-budget-aware context assembly
 
-This ladder is the planned ablation and evaluation direction. Milestone 5 adds **graph-augmented hybrid retrieval** as a fourth comparable method. Milestone 6 adds **structured reranking with deterministic explanations** as a fifth mode. Lexical, dense, hybrid, and graph baselines remain unchanged. Context compilation remains Milestone 7.
+This ladder is the planned ablation and evaluation direction. Milestone 6 adds **structured reranking with deterministic explanations**. Milestone 7 adds a **token-budget context compiler** that packs ranked CodeUnits under an estimated budget without calling an LLM. Lexical through reranked baselines remain unchanged. Incremental indexing and optional LLM integration remain later milestones.
 
 ## Target Architecture
 
@@ -57,13 +57,13 @@ flowchart TD
 
 ## Current Status
 
-The project is at **Milestone 6 — Structured Reranking & Explainability**.
+The project is at **Milestone 7 — Token-Budget Context Compiler**.
 
 Verified capabilities today:
 
 - Python 3.14 project managed with [uv](https://docs.astral.sh/uv/)
 - `src/`-layout Python package (`codeintel`)
-- Typer CLI with `aicode version`, `aicode inspect`, `aicode graph`, `aicode index`, `aicode embed`, and `aicode search`
+- Typer CLI with `aicode version`, `aicode inspect`, `aicode graph`, `aicode index`, `aicode embed`, `aicode search`, and `aicode context`
 - Tree-sitter Python parsing isolated behind a thin parser wrapper
 - `PythonAdapter` semantic extraction into language-neutral `Symbol` and `CodeUnit` models
 - Repository-level symbol indexing and duplicate qualified-name detection
@@ -94,16 +94,21 @@ Verified capabilities today:
 - Relation-specific evidence channels (CALLS/REFERENCES/INHERITS/CONTAINS, RESOLVED only)
 - Equal-weight final RRF over Graph ranking + nonempty evidence lists (`k=60`)
 - `RerankedResult` + `RerankExplanation` with rank delta, RRF contributions, relation evidence
+- Pure `compile_context(Sequence[RerankedResult], token_budget, TokenCounter)` packing API
+- `TokenCounter` Protocol + dependency-free `SimpleTokenCounter` (`simple-lexical-v1` estimate)
+- Whole-CodeUnit atomic packing; greedy skip-to-fit; qname dedup; byte-span overlap suppression
+- `ContextBlock` / `CompiledContext` with final-text budget invariant `count(text) <= budget`
 - `aicode search --mode lexical|dense|hybrid|graph|reranked` (default remains lexical)
 - Optional `--explain` (reranked mode only) for compact structured provenance
+- `aicode context PATH QUERY --budget N` (required budget; CLI pool = top 20 reranked)
 - Deterministic module-name derivation and source-file discovery
-- Fixture-backed parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, reranking, and CLI tests
+- Fixture-backed parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, reranking, context, and CLI tests
 - Unit tests with pytest
 - Linting and formatting with Ruff
 - Strict static typing with mypy
 - GitHub Actions CI on push and pull request
 
-Context compilation, incremental indexing, and LLM answer generation are not implemented yet.
+Incremental indexing and LLM answer generation are not implemented yet.
 
 ## Current Capabilities
 
@@ -125,6 +130,7 @@ uv run aicode search PATH QUERY --mode hybrid
 uv run aicode search PATH QUERY --mode graph
 uv run aicode search PATH QUERY --mode reranked
 uv run aicode search PATH QUERY --mode reranked --explain
+uv run aicode context PATH QUERY --budget N
 ```
 
 Expected version output:
@@ -142,6 +148,8 @@ aicode 0.1.0
 `aicode embed` builds/rebuilds the dense FAISS artifact from an **existing** SQLite index (it does not run `index` automatically). Default artifact directory: `PATH/.codeintel/dense/`. Requires the optional `embeddings` extra. Default model: `sentence-transformers/all-MiniLM-L6-v2`. Overrides: `--db`, `--dense-dir`, `--model`.
 
 `aicode search PATH QUERY` searches a previously built index (default `PATH/.codeintel/index.db`, overridable with `--db`). It does not reindex automatically. Default `--mode` is `lexical` (unchanged from Milestone 3). Dense/hybrid/graph/reranked modes require a dense artifact (`aicode embed`) and the embeddings extra. Optional `--limit`, `--kind`, `--path-prefix`, and `--dense-dir` are supported. `--explain` prints structured rerank provenance and is valid only with `--mode reranked`.
+
+`aicode context PATH QUERY --budget N` compiles a language-neutral context from the top **20** reranked candidates (`search_reranked` → `compile_context`). `--budget` is required and uses **estimated** `simple-lexical-v1` units (not a vendor LLM tokenizer). Supports `--db`, `--dense-dir`, `--kind`, and `--path-prefix`. Requires a dense artifact.
 
 ### Language adapter and semantic extraction
 
@@ -255,6 +263,21 @@ Conservative policy rationale: keep ablation clean, bound expansion (no depth-2 
 
 No relation-type numeric weights, locality/kind/degree boosts, IMPORTS/PROBABLE evidence, cross-encoder, or LLM prose. `--explain` formats the structured explanation compactly on the CLI.
 
+### Token-budget context compiler
+
+`compile_context(...)` is a **pure** packing transform over a finite `Sequence[RerankedResult]`:
+
+1. Process candidates in input order (1-based source ranks)
+2. Defensive qname dedup (first occurrence wins)
+3. Byte-span overlap suppression against **selected** blocks only (same path + overlapping `[start_byte, end_byte)`)
+4. Render whole CodeUnits with plain language-neutral delimiters (no Markdown fences; no separate signature/score/explanation lines)
+5. Greedy skip-to-fit: if a whole block does not fit, omit (`OVERSIZED` / `BUDGET`) and continue
+6. Authoritative invariant: `token_counter.count(compiled.text) <= token_budget` and `used_tokens == count(text)`
+
+Default counter: `SimpleTokenCounter` / `simple-lexical-v1` — deterministic **estimated** lexical units (ASCII identifiers, numbers, other non-whitespace characters). It is **not** OpenAI/Anthropic/Gemini/MiniLM tokenization. Exact model-window compliance requires injecting a compatible `TokenCounter` later (Milestone 10 territory).
+
+CLI `aicode context` orchestrates `search_reranked(..., limit=20)` then `compile_context` with `SimpleTokenCounter`. The compiler itself never retrieves. The token budget applies to `CompiledContext.text` only; the CLI's compact human-readable summary is printed separately and is not part of the budgeted text.
+
 The real embedding stack is an **optional** extra:
 
 ```bash
@@ -285,7 +308,14 @@ Baseline limitations:
 - no structured reranking beyond the Graph+evidence RRF baseline
 - no cross-encoder / learned reranker
 - no LLM explanation generation
-- no token-budget context compilation yet (Milestone 7)
+- default context token count is a deterministic estimate (`simple-lexical-v1`), not an exact vendor tokenizer
+- CodeUnits are never truncated or chunked; oversized high-ranked units may be skipped
+- greedy skip-to-fit packing is not global optimization
+- first-selected overlap policy follows rerank order (omitted parents do not reserve spans)
+- CLI context examines only the top 20 reranked candidates
+- rerank score / M6 explanations are not rendered into compiled code context
+- no LLM call / answer generation
+- no incremental indexing yet
 - no benchmark improvement claims yet
 
 ## Technology Stack
@@ -314,8 +344,8 @@ Baseline limitations:
 
 | Technology | Planned role |
 |------------|--------------|
-| Structured reranker / explainability | Milestone 6 (current) |
-| Context compiler | Milestone 7 |
+| Structured reranker / explainability | Milestone 6 |
+| Context compiler | Milestone 7 (current) |
 | Incremental indexing | Milestone 8 |
 | C++ language adapter | Milestone 9 |
 | Benchmark suite / optional LLM | Milestone 10 |
@@ -343,6 +373,7 @@ graph_code_intelligence/
 │       ├── models.py
 │       ├── repository.py
 │       ├── reranking.py
+│       ├── context.py
 │       ├── vector_index.py
 │       ├── languages/
 │       │   ├── __init__.py
@@ -362,6 +393,7 @@ graph_code_intelligence/
 │   │   ├── python_graph/
 │   │   ├── python_graph_search/
 │   │   ├── python_rerank/
+│   │   ├── python_context/
 │   │   ├── python_repo/
 │   │   └── python_search/
 │   ├── helpers/
@@ -372,7 +404,8 @@ graph_code_intelligence/
 │   │   ├── test_graph_search_cli.py
 │   │   ├── test_index_search_cli.py
 │   │   ├── test_inspect_cli.py
-│   │   └── test_reranked_search_cli.py
+│   │   ├── test_reranked_search_cli.py
+│   │   └── test_context_cli.py
 │   └── unit/
 │       ├── test_cli.py
 │       ├── test_dense.py
@@ -382,6 +415,7 @@ graph_code_intelligence/
 │       ├── test_graph_retrieval.py
 │       ├── test_hybrid.py
 │       ├── test_reranking.py
+│       ├── test_context.py
 │       ├── test_language_adapter.py
 │       ├── test_lexical.py
 │       ├── test_models.py
@@ -446,6 +480,7 @@ uv run aicode search PATH QUERY --mode hybrid
 uv run aicode search PATH QUERY --mode graph
 uv run aicode search PATH QUERY --mode reranked
 uv run aicode search PATH QUERY --mode reranked --explain
+uv run aicode context PATH QUERY --budget N
 ```
 
 Expected version output:
@@ -493,7 +528,7 @@ Run each check independently:
 uv run pytest
 ```
 
-Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, SQLite persistence, lexical BM25 search, dense/hybrid/graph/reranked retrieval with a fake embedding provider, and CLI inspect/graph/index/embed/search behavior. Default pytest does **not** download embedding models.
+Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, SQLite persistence, lexical BM25 search, dense/hybrid/graph/reranked retrieval, token-budget context compilation with a fake embedding provider, and CLI inspect/graph/index/embed/search/context behavior. Default pytest does **not** download embedding models.
 
 ```bash
 uv run ruff check .
@@ -535,8 +570,8 @@ The workflow is configured in this repository and runs on GitHub for pushes and 
 | 3 | Persistent Index & Lexical Retrieval | Complete |
 | 4 | Dense & Hybrid Retrieval | Complete |
 | 5 | Graph-Augmented Retrieval | Complete |
-| 6 | Structured Reranking & Explainability | **Current** |
-| 7 | Token-Budget Context Compiler | Planned |
+| 6 | Structured Reranking & Explainability | Complete |
+| 7 | Token-Budget Context Compiler | **Current** |
 | 8 | Incremental Indexing | Planned |
 | 9 | C++ Language Adapter | Planned |
 | 10 | Benchmark Suite, Optional LLM Integration & Portfolio Polish | Planned |

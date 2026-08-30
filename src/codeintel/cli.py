@@ -515,6 +515,135 @@ def _print_rerank_explanation(explanation: RerankExplanation) -> None:
             )
 
 
+@app.command("context")
+def context_command(
+    path: Path,
+    query: str,
+    budget: Annotated[
+        int,
+        typer.Option(
+            "--budget",
+            help=(
+                "Required estimated token budget (simple-lexical-v1 units; "
+                "not a vendor LLM tokenizer)."
+            ),
+        ),
+    ],
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="SQLite index path (default: PATH/.codeintel/index.db)."),
+    ] = None,
+    dense_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--dense-dir",
+            help="Dense artifact directory (default: PATH/.codeintel/dense/).",
+        ),
+    ] = None,
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help="Optional SymbolKind filter (module, class, function, method).",
+        ),
+    ] = None,
+    path_prefix: Annotated[
+        str | None,
+        typer.Option("--path-prefix", help="Optional repository-relative path prefix filter."),
+    ] = None,
+) -> None:
+    """Compile a token-budgeted context from reranked CodeUnits."""
+    from codeintel.context import CONTEXT_CANDIDATE_LIMIT, SimpleTokenCounter, compile_context
+
+    if not path.exists():
+        typer.echo(f"Error: path does not exist: {path}", err=True)
+        raise typer.Exit(code=1)
+    if not path.is_dir():
+        typer.echo("Error: context expects a repository directory, not a file.", err=True)
+        raise typer.Exit(code=1)
+    if budget < 0:
+        typer.echo("Error: --budget must be >= 0.", err=True)
+        raise typer.Exit(code=1)
+    if not query.strip():
+        typer.echo("No query terms provided.")
+        raise typer.Exit(code=0)
+
+    database_path = db if db is not None else default_index_path(path)
+    artifact_dir = dense_dir if dense_dir is not None else default_dense_dir(path)
+    if not database_path.exists():
+        typer.echo(
+            f"Error: index database does not exist: {database_path}\n"
+            f"Run `aicode index {path}` first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    symbol_kind: SymbolKind | None = None
+    if kind is not None:
+        try:
+            symbol_kind = SymbolKind(kind)
+        except ValueError as exc:
+            typer.echo(
+                "Error: --kind must be one of: module, class, function, method.",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+
+    try:
+        with IndexDatabase(database_path, create=False) as database:
+            reranked = _search_reranked(
+                database,
+                query,
+                artifact_dir=artifact_dir,
+                limit=CONTEXT_CANDIDATE_LIMIT,
+                kind=symbol_kind,
+                path_prefix=path_prefix,
+            )
+            compiled = compile_context(
+                reranked,
+                token_budget=budget,
+                token_counter=SimpleTokenCounter(),
+            )
+    except EmbeddingDependencyError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except DenseIndexMissingError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except DenseIndexMismatchError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except DenseIndexError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except SchemaVersionError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except IndexDatabaseError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if compiled.text:
+        typer.echo(compiled.text, nl=False)
+        if not compiled.text.endswith("\n"):
+            typer.echo("")
+        typer.echo("")
+    else:
+        typer.echo("Empty compiled context.")
+        typer.echo("")
+
+    typer.echo(
+        "summary: "
+        f"used={compiled.used_tokens}/{compiled.token_budget} estimated tokens "
+        f"({compiled.token_counter_id}); "
+        f"selected={compiled.selected_count}/{compiled.candidate_count}; "
+        f"omitted={compiled.omitted_count}"
+    )
+
+
 def _source_preview(source_text: str, *, max_chars: int = 120) -> str:
     first_line = source_text.splitlines()[0] if source_text else ""
     compact = " ".join(first_line.split())
