@@ -36,3 +36,6 @@ dist/
 
 # Logs
 *.log
+
+# Generated persistent code index (Milestone 3)
+.codeintel/

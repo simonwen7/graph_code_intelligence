@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -11,8 +12,15 @@ from codeintel import __version__
 from codeintel.discovery import discover_source_files
 from codeintel.graph import CodeGraph
 from codeintel.languages.python import PythonAdapter, PythonRelationExtractor
-from codeintel.models import AnalysisResult, Relation
+from codeintel.lexical import search_code_units
+from codeintel.models import AnalysisResult, Relation, SearchResult, SymbolKind
 from codeintel.repository import RepositoryAnalysis, analyze_repository
+from codeintel.storage import (
+    IndexDatabase,
+    IndexDatabaseError,
+    SchemaVersionError,
+    default_index_path,
+)
 
 app = typer.Typer(
     name="aicode",
@@ -59,11 +67,13 @@ def inspect_command(path: Path) -> None:
 @app.command("graph")
 def graph_command(
     path: Path,
-    symbol: str | None = typer.Option(
-        None,
-        "--symbol",
-        help="Show incoming and outgoing relations for one qualified name.",
-    ),
+    symbol: Annotated[
+        str | None,
+        typer.Option(
+            "--symbol",
+            help="Show incoming and outgoing relations for one qualified name.",
+        ),
+    ] = None,
 ) -> None:
     """Inspect the in-memory code graph for a repository directory."""
     if not path.exists():
@@ -88,6 +98,137 @@ def graph_command(
         return
 
     _print_graph_summary(analysis)
+
+
+@app.command("index")
+def index_command(
+    path: Path,
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="SQLite index path (default: PATH/.codeintel/index.db)."),
+    ] = None,
+) -> None:
+    """Build a persistent SQLite lexical index for a repository directory."""
+    if not path.exists():
+        typer.echo(f"Error: path does not exist: {path}", err=True)
+        raise typer.Exit(code=1)
+    if not path.is_dir():
+        typer.echo("Error: index expects a repository directory, not a file.", err=True)
+        raise typer.Exit(code=1)
+
+    database_path = db if db is not None else default_index_path(path)
+    try:
+        analysis = analyze_repository(path, PythonAdapter(), PythonRelationExtractor())
+        with IndexDatabase(database_path) as database:
+            stats = database.rebuild(analysis)
+    except (OSError, ValueError, IndexDatabaseError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"database: {database_path}")
+    typer.echo(f"files: {stats.files}")
+    typer.echo(f"symbols: {stats.symbols}")
+    typer.echo(f"code_units: {stats.code_units}")
+    typer.echo(f"relations: {stats.relations}")
+    typer.echo(f"fts_documents: {stats.fts_documents}")
+
+
+@app.command("search")
+def search_command(
+    path: Path,
+    query: str,
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="SQLite index path (default: PATH/.codeintel/index.db)."),
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1, help="Maximum number of results.")] = 10,
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help="Optional SymbolKind filter (module, class, function, method).",
+        ),
+    ] = None,
+    path_prefix: Annotated[
+        str | None,
+        typer.Option("--path-prefix", help="Optional repository-relative path prefix filter."),
+    ] = None,
+) -> None:
+    """Search a previously built persistent CodeUnit index."""
+    if not path.exists():
+        typer.echo(f"Error: path does not exist: {path}", err=True)
+        raise typer.Exit(code=1)
+    if not path.is_dir():
+        typer.echo("Error: search expects a repository directory, not a file.", err=True)
+        raise typer.Exit(code=1)
+
+    if not query.strip():
+        typer.echo("No query terms provided.")
+        raise typer.Exit(code=0)
+
+    database_path = db if db is not None else default_index_path(path)
+    if not database_path.exists():
+        typer.echo(
+            f"Error: index database does not exist: {database_path}\n"
+            f"Run `aicode index {path}` first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    symbol_kind: SymbolKind | None = None
+    if kind is not None:
+        try:
+            symbol_kind = SymbolKind(kind)
+        except ValueError as exc:
+            typer.echo(
+                "Error: --kind must be one of: module, class, function, method.",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+
+    try:
+        with IndexDatabase(database_path, create=False) as database:
+            results = search_code_units(
+                database,
+                query,
+                limit=limit,
+                kind=symbol_kind,
+                path_prefix=path_prefix,
+            )
+    except SchemaVersionError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except IndexDatabaseError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not results:
+        typer.echo("No matching code units.")
+        raise typer.Exit(code=0)
+
+    for rank, result in enumerate(results, start=1):
+        _print_search_result(rank, result)
+
+
+def _print_search_result(rank: int, result: SearchResult) -> None:
+    signature = result.signature if result.signature is not None else "-"
+    preview = _source_preview(result.source_text)
+    typer.echo(f"{rank}. score={result.score:.6f}")
+    typer.echo(f"   {result.kind.value} {result.symbol_qualified_name}")
+    typer.echo(f"   {result.path.as_posix()}:L{result.span.start_line}-{result.span.end_line}")
+    typer.echo(f"   signature: {signature}")
+    typer.echo(f"   preview: {preview}")
+
+
+def _source_preview(source_text: str, *, max_chars: int = 120) -> str:
+    first_line = source_text.splitlines()[0] if source_text else ""
+    compact = " ".join(first_line.split())
+    if len(compact) <= max_chars:
+        return compact
+    return compact[: max_chars - 3] + "..."
 
 
 def _print_analysis_result(result: AnalysisResult) -> None:

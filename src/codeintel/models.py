@@ -111,3 +111,19 @@ class Relation:
         elif self.resolution is ResolutionStatus.UNRESOLVED:
             if self.target_qualified_name is not None:
                 raise ValueError("unresolved relations must not fabricate a target qualified name")
+
+
+@dataclass(frozen=True, slots=True)
+class SearchResult:
+    """A lexical retrieval hit over a persisted CodeUnit snapshot.
+
+    ``score`` is higher-is-better: ``score = -raw_sqlite_bm25``.
+    """
+
+    symbol_qualified_name: str
+    kind: SymbolKind
+    path: Path
+    span: SourceSpan
+    signature: str | None
+    source_text: str
+    score: float
