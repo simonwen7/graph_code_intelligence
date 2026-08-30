@@ -93,7 +93,7 @@ def test_embed_and_mode_search_offline(tmp_path: Path, monkeypatch: pytest.Monke
     assert embedded.exit_code == 0, embedded.stdout + embedded.stderr
     assert (dense_dir / "index.faiss").is_file()
     assert (dense_dir / "metadata.json").is_file()
-    assert "documents:" in embedded.stdout
+    assert "documents_total:" in embedded.stdout
 
     lexical = runner.invoke(
         app,

@@ -138,8 +138,19 @@ def index_command(
         Path | None,
         typer.Option("--db", help="SQLite index path (default: PATH/.codeintel/index.db)."),
     ] = None,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full",
+            help=(
+                "Force a full schema-v2 rebuild (required to upgrade unsupported schema versions)."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Build a persistent SQLite lexical index for a repository directory."""
+    """Build or incrementally update a persistent SQLite lexical index."""
+    from codeintel.indexing import index_repository
+
     if not path.exists():
         typer.echo(f"Error: path does not exist: {path}", err=True)
         raise typer.Exit(code=1)
@@ -149,14 +160,31 @@ def index_command(
 
     database_path = db if db is not None else default_index_path(path)
     try:
-        analysis = analyze_repository(path, PythonAdapter(), PythonRelationExtractor())
-        with IndexDatabase(database_path) as database:
-            stats = database.rebuild(analysis)
+        stats = index_repository(
+            path,
+            PythonAdapter(),
+            PythonRelationExtractor(),
+            database_path=database_path,
+            full=full,
+        )
+    except SchemaVersionError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
     except (OSError, ValueError, IndexDatabaseError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"database: {database_path}")
+    typer.echo(f"mode: {stats.mode}")
+    typer.echo(
+        "files "
+        f"added={stats.files_added} changed={stats.files_changed} "
+        f"deleted={stats.files_deleted} unchanged={stats.files_unchanged}"
+    )
+    typer.echo(f"analyzed={stats.files_analyzed}")
+    typer.echo(f"relation_files_recomputed={stats.relation_files_recomputed}")
+    typer.echo(f"symbols_rewritten={stats.symbols_rewritten}")
+    typer.echo(f"code_units_rewritten={stats.code_units_rewritten}")
     typer.echo(f"files: {stats.files}")
     typer.echo(f"symbols: {stats.symbols}")
     typer.echo(f"code_units: {stats.code_units}")
@@ -182,6 +210,13 @@ def embed_command(
         str,
         typer.Option("--model", help="Embedding model id for the Sentence Transformers provider."),
     ] = DEFAULT_MODEL_ID,
+    full: Annotated[
+        bool,
+        typer.Option(
+            "--full",
+            help="Ignore vector reuse and re-embed every current dense document.",
+        ),
+    ] = False,
 ) -> None:
     """Build a dense FAISS artifact from an existing SQLite index."""
     if not path.exists():
@@ -204,7 +239,12 @@ def embed_command(
     try:
         provider = create_embedding_provider(model)
         with IndexDatabase(database_path, create=False) as database:
-            stats = build_dense_index(database, provider, artifact_dir=artifact_dir)
+            stats = build_dense_index(
+                database,
+                provider,
+                artifact_dir=artifact_dir,
+                full=full,
+            )
     except EmbeddingDependencyError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -219,9 +259,13 @@ def embed_command(
     typer.echo(f"dense_dir: {stats.artifact_dir}")
     typer.echo(f"provider: {stats.provider_id}")
     typer.echo(f"model: {stats.model_id}")
-    typer.echo(f"documents: {stats.document_count}")
+    typer.echo(f"documents_total: {stats.document_count}")
+    typer.echo(f"vectors_reused: {stats.vectors_reused}")
+    typer.echo(f"vectors_embedded: {stats.vectors_embedded}")
     typer.echo(f"dimension: {stats.dimension}")
     typer.echo(f"corpus_fingerprint: {stats.corpus_fingerprint}")
+    if not stats.rewritten:
+        typer.echo("artifact: unchanged (all vectors reusable)")
 
 
 @app.command("search")

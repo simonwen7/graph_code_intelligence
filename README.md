@@ -34,7 +34,7 @@ The planned evaluation compares retrieval strategies along an ablation ladder:
 4. **Hybrid + Code Graph** — graph expansion over static relationships between symbols and files
 5. **Hybrid + Graph + Structured Reranking + Context Compilation** — full engine with token-budget-aware context assembly
 
-This ladder is the planned ablation and evaluation direction. Milestone 6 adds **structured reranking with deterministic explanations**. Milestone 7 adds a **token-budget context compiler** that packs ranked CodeUnits under an estimated budget without calling an LLM. Lexical through reranked baselines remain unchanged. Incremental indexing and optional LLM integration remain later milestones.
+This ladder is the planned ablation and evaluation direction. Milestone 8 adds **incremental SQLite indexing** and **selective dense vector reuse**. Lexical through context-compiler query-time baselines remain unchanged. C++ and optional LLM integration remain later milestones.
 
 ## Target Architecture
 
@@ -57,7 +57,7 @@ flowchart TD
 
 ## Current Status
 
-The project is at **Milestone 7 — Token-Budget Context Compiler**.
+The project is at **Milestone 8 — Incremental Indexing**.
 
 Verified capabilities today:
 
@@ -70,7 +70,16 @@ Verified capabilities today:
 - Static `CONTAINS`, `IMPORTS`, `REFERENCES`, `CALLS`, and `INHERITS` relations
 - Conservative Python lexical-scope analysis with `RESOLVED` / `PROBABLE` / `UNRESOLVED` status
 - In-memory `CodeGraph` with incoming/outgoing adjacency, filtering, bounded BFS, and shortest distance
-- SQLite persistent index (`PRAGMA user_version = 1`) with transactional full rebuild
+- SQLite persistent index (`PRAGMA user_version = 2`) with `files.content_sha256` (raw-byte SHA-256)
+- Incremental `aicode index` by default; `aicode index --full` for recovery / schema upgrade
+- Schema v1 databases require explicit `--full` rebuild (no silent migration)
+- Deterministic `FileChangeSet` (added/changed/deleted/unchanged); rename = delete+add
+- Analyze only added/changed files; preserve unchanged Symbols/CodeUnits/FTS row ids
+- Resolution-surface local vs global relation refresh (no stale cross-file edges)
+- Exact index work stats (analyzed / relation files recomputed / rewritten counts)
+- Selective dense embedding reuse via per-document fingerprints + FAISS Flat reconstruction
+- `aicode embed --full` forces re-embed; artifact_version remains `1` with optional fingerprints
+- Explicit index → dense stale lifecycle (search rejects stale corpus fingerprint until re-embed)
 - Persisted files, Symbols, CodeUnits, and Relations using repository-relative POSIX paths
 - FTS5 one-document-per-CodeUnit indexing with the `unicode61` tokenizer
 - BM25 lexical retrieval with higher-is-better `SearchResult.score` (`score = -raw_bm25`)
@@ -108,7 +117,7 @@ Verified capabilities today:
 - Strict static typing with mypy
 - GitHub Actions CI on push and pull request
 
-Incremental indexing and LLM answer generation are not implemented yet.
+Incremental indexing is implemented for SQLite + selective dense reuse. LLM answer generation is not implemented yet.
 
 ## Current Capabilities
 
@@ -123,7 +132,9 @@ uv run aicode inspect PATH
 uv run aicode graph PATH
 uv run aicode graph PATH --symbol QUALIFIED_NAME
 uv run aicode index PATH
+uv run aicode index PATH --full
 uv run aicode embed PATH
+uv run aicode embed PATH --full
 uv run aicode search PATH QUERY
 uv run aicode search PATH QUERY --mode dense
 uv run aicode search PATH QUERY --mode hybrid
@@ -143,9 +154,9 @@ aicode 0.1.0
 
 `aicode graph` expects a **repository directory**. It builds a repository-level symbol index and in-memory CodeGraph, then prints relation summaries. `--symbol` shows incoming and outgoing edges for one qualified name. This inspection command is separate from retrieval `--mode graph`.
 
-`aicode index` expects a **repository directory**. It analyzes the repository, then writes a full SQLite snapshot to `PATH/.codeintel/index.db` by default (`--db` overrides). Indexing is a transactional full rebuild.
+`aicode index` expects a **repository directory**. Default behavior is **incremental** against an existing schema-v2 SQLite DB (`PATH/.codeintel/index.db`, overridable with `--db`). Missing DBs perform an initial full schema-v2 build. Unsupported schema versions (including v1) fail clearly and require `aicode index PATH --full`. `--full` analyzes the whole repository into a temporary DB and atomically replaces the target only on success. Indexing does **not** run `embed`.
 
-`aicode embed` builds/rebuilds the dense FAISS artifact from an **existing** SQLite index (it does not run `index` automatically). Default artifact directory: `PATH/.codeintel/dense/`. Requires the optional `embeddings` extra. Default model: `sentence-transformers/all-MiniLM-L6-v2`. Overrides: `--db`, `--dense-dir`, `--model`.
+`aicode embed` builds/rebuilds the dense FAISS artifact from an **existing** SQLite index (it does not run `index` automatically). Default artifact directory: `PATH/.codeintel/dense/`. Requires the optional `embeddings` extra. Default model: `sentence-transformers/all-MiniLM-L6-v2`. Overrides: `--db`, `--dense-dir`, `--model`. Default embed **reuses** eligible old Flat vectors when per-document fingerprints match; `--full` re-embeds every document.
 
 `aicode search PATH QUERY` searches a previously built index (default `PATH/.codeintel/index.db`, overridable with `--db`). It does not reindex automatically. Default `--mode` is `lexical` (unchanged from Milestone 3). Dense/hybrid/graph/reranked modes require a dense artifact (`aicode embed`) and the embeddings extra. Optional `--limit`, `--kind`, `--path-prefix`, and `--dense-dir` are supported. `--explain` prints structured rerank provenance and is valid only with `--mode reranked`.
 
@@ -196,11 +207,28 @@ The in-memory CodeGraph uses `Symbol.qualified_name` as node identity. Unresolve
 
 `IndexDatabase` stores a language-neutral snapshot of repository analysis in SQLite:
 
-- schema version via `PRAGMA user_version` (currently `1`)
+- schema version via `PRAGMA user_version` (currently `2`)
+- `files.content_sha256` stores lowercase hex SHA-256 of **raw file bytes**
 - tables for files, symbols, code_units, and relations
 - repository-relative POSIX path identity for files
 - one FTS5 document per CodeUnit (`unicode61` tokenizer)
-- transactional full rebuild (delete snapshot, rewrite, commit; rollback preserves the prior index)
+- incremental transactional updates (and `--full` rebuild via temp DB + atomic replace)
+
+### Incremental indexing
+
+`index_repository(...)` discovers and hashes all supported source files, computes a `FileChangeSet`, analyzes only added/changed files, validates the proposed global symbol table, then applies one SQLite transaction.
+
+Relation refresh:
+
+- if the global resolution surface (`qualified_name` / `name` / `kind` / `parent_qualified_name`) is unchanged → recompute relations only for added/changed files
+- if the surface changes → re-extract relations for **all** current files against the proposed symbol table (unchanged files may be reparsed by the relation extractor; Symbol/CodeUnit rows for unchanged files are not rewritten)
+
+Dense reuse:
+
+- optional `document_fingerprints` in metadata (artifact_version remains `1`)
+- reuse requires matching qname + dense-document fingerprint + provider/model/dimension contract
+- reusable vectors are reconstructed from the previous `IndexFlatIP`, then a new Flat index is built in deterministic qname order
+- after SQLite changes, search continues to reject stale artifacts until `aicode embed` refreshes them
 
 `search_code_units(...)` performs BM25 retrieval. SQLite's raw `bm25(...)` ranks lower/more-negative as better; `SearchResult.score` exposes `-raw_bm25` so **higher score means better relevance** within that method. Scores are retrieval ranks, not probabilities, and are **not comparable across** lexical / dense / hybrid modes.
 
@@ -288,8 +316,17 @@ Default `uv sync` (and CI) installs NumPy + FAISS only. Tests use a deterministi
 
 Baseline limitations:
 
-- indexing is full rebuild only (no incremental updates yet)
-- dense artifacts are also full rebuild (no changed-file embedding invalidation)
+- indexing still discovers and hashes all supported source bytes on every `aicode index`
+- global symbol-resolution changes require relation extraction for all current files (unchanged files may be reparsed for relations)
+- no AST / whole-file source cache; no dependency-invalidation graph
+- schema v1 indexes require explicit `aicode index --full` (no silent migration)
+- path rename/move is delete+add (no logical rename detection)
+- syntax-error source replaces prior indexed truth for that file
+- SQLite and dense artifacts update in separate commands (stale dense until re-embed)
+- FAISS Flat files are rebuilt even when vectors are reused; reuse saves embedding calls
+- no file watcher / daemon
+- indexing is no longer full-rewrite-only, but dense ANN / vector-DB upserts are not implemented
+- dense artifacts are selectively refreshed (not a separate embedding cache product)
 - `unicode61` is not a code-specific tokenizer
 - camelCase is not specially segmented
 - default MiniLM model is a **general** semantic baseline, not code-specialized
@@ -315,7 +352,7 @@ Baseline limitations:
 - CLI context examines only the top 20 reranked candidates
 - rerank score / M6 explanations are not rendered into compiled code context
 - no LLM call / answer generation
-- no incremental indexing yet
+- no incremental indexing watcher/daemon
 - no benchmark improvement claims yet
 
 ## Technology Stack
@@ -345,8 +382,8 @@ Baseline limitations:
 | Technology | Planned role |
 |------------|--------------|
 | Structured reranker / explainability | Milestone 6 |
-| Context compiler | Milestone 7 (current) |
-| Incremental indexing | Milestone 8 |
+| Context compiler | Milestone 7 |
+| Incremental indexing | Milestone 8 (current) |
 | C++ language adapter | Milestone 9 |
 | Benchmark suite / optional LLM | Milestone 10 |
 
@@ -369,6 +406,7 @@ graph_code_intelligence/
 │       ├── graph.py
 │       ├── graph_retrieval.py
 │       ├── hybrid.py
+│       ├── indexing.py
 │       ├── lexical.py
 │       ├── models.py
 │       ├── repository.py

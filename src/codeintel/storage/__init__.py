@@ -1,6 +1,7 @@
 """SQLite persistence for repository indexes."""
 
 from codeintel.storage.database import (
+    FileAnalysisView,
     IndexDatabase,
     IndexDatabaseError,
     IndexStats,
@@ -11,6 +12,7 @@ from codeintel.storage.schema import SCHEMA_VERSION, default_index_path
 
 __all__ = [
     "SCHEMA_VERSION",
+    "FileAnalysisView",
     "IndexDatabase",
     "IndexDatabaseError",
     "IndexStats",

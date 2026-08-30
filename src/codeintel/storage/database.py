@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from codeintel.models import (
     AnalysisResult,
@@ -20,6 +21,9 @@ from codeintel.models import (
 )
 from codeintel.repository import RepositoryAnalysis
 from codeintel.storage.schema import SCHEMA_SQL, SCHEMA_VERSION
+
+if TYPE_CHECKING:
+    from codeintel.indexing import FileChangeSet
 
 
 class IndexDatabaseError(Exception):
@@ -53,8 +57,21 @@ class PersistedCodeUnitView:
     source_text: str
 
 
+@dataclass(frozen=True, slots=True)
+class FileAnalysisView:
+    """Persisted per-file semantic view for relation refresh without re-analysis."""
+
+    path: str
+    language_id: str
+    module_name: str
+    has_syntax_errors: bool
+    content_sha256: str
+    symbols: tuple[Symbol, ...]
+    code_units: tuple[CodeUnit, ...]
+
+
 class IndexDatabase:
-    """Small SQLite-backed repository index with full-rebuild semantics."""
+    """SQLite-backed repository index with full-rebuild and incremental updates."""
 
     def __init__(self, path: Path, *, create: bool = True) -> None:
         self.path = Path(path)
@@ -105,9 +122,14 @@ class IndexDatabase:
         row = self.connection.execute("PRAGMA user_version").fetchone()
         return int(row[0]) if row is not None else 0
 
-    def rebuild(self, analysis: RepositoryAnalysis) -> IndexStats:
+    def rebuild(
+        self,
+        analysis: RepositoryAnalysis,
+        *,
+        content_hashes: Mapping[str, str] | None = None,
+    ) -> IndexStats:
         """Replace the entire index snapshot from ``analysis`` in one transaction."""
-        prepared = _PreparedSnapshot.from_analysis(analysis)
+        prepared = _PreparedSnapshot.from_analysis(analysis, content_hashes=content_hashes)
         try:
             with self._write_transaction():
                 self.connection.execute("DELETE FROM code_units_fts")
@@ -129,6 +151,192 @@ class IndexDatabase:
             relations=len(prepared.relations),
             fts_documents=len(prepared.fts_rows),
         )
+
+    def apply_incremental_update(
+        self,
+        *,
+        root: Path,
+        changeset: FileChangeSet,
+        current_hashes: Mapping[str, str],
+        analyzed: Mapping[str, AnalysisResult],
+        relations: Sequence[Relation],
+        global_relation_refresh: bool,
+    ) -> IndexStats:
+        """Apply an incremental semantic update in one transaction."""
+        try:
+            with self._write_transaction():
+                file_id_by_path = self._load_file_id_map()
+                paths_to_refresh = tuple(sorted((*changeset.changed, *changeset.deleted)))
+
+                if paths_to_refresh:
+                    self._delete_fts_for_paths(paths_to_refresh, file_id_by_path)
+
+                if global_relation_refresh:
+                    self.connection.execute("DELETE FROM relations")
+                else:
+                    self._delete_relations_for_paths(
+                        tuple(sorted((*changeset.changed, *changeset.deleted))),
+                        file_id_by_path,
+                    )
+
+                if paths_to_refresh:
+                    self._delete_code_units_for_paths(paths_to_refresh, file_id_by_path)
+                    self._delete_symbols_for_paths(paths_to_refresh, file_id_by_path)
+
+                for relative in changeset.deleted:
+                    file_id = file_id_by_path.get(relative)
+                    if file_id is not None:
+                        self.connection.execute("DELETE FROM files WHERE id = ?", (file_id,))
+
+                for relative in changeset.changed:
+                    result = analyzed[relative]
+                    file_id = file_id_by_path[relative]
+                    self.connection.execute(
+                        """
+                        UPDATE files
+                        SET language_id = ?, module_name = ?, has_syntax_errors = ?,
+                            content_sha256 = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            result.language_id,
+                            result.module_name,
+                            int(result.has_syntax_errors),
+                            current_hashes[relative],
+                            file_id,
+                        ),
+                    )
+
+                for relative in changeset.added:
+                    result = analyzed[relative]
+                    cursor = self.connection.execute(
+                        """
+                        INSERT INTO files(
+                            path, language_id, module_name, has_syntax_errors, content_sha256
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            relative,
+                            result.language_id,
+                            result.module_name,
+                            int(result.has_syntax_errors),
+                            current_hashes[relative],
+                        ),
+                    )
+                    assert cursor.lastrowid is not None
+                    file_id_by_path[relative] = int(cursor.lastrowid)
+
+                insert_paths = tuple(sorted((*changeset.added, *changeset.changed)))
+                symbol_ids: dict[str, int] = {}
+                for relative in insert_paths:
+                    result = analyzed[relative]
+                    file_id = file_id_by_path[relative]
+                    for symbol in sorted(result.symbols, key=lambda item: item.qualified_name):
+                        cursor = self.connection.execute(
+                            """
+                            INSERT INTO symbols(
+                                file_id, name, qualified_name, kind,
+                                start_line, end_line, start_byte, end_byte,
+                                signature, parent_qualified_name
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                file_id,
+                                symbol.name,
+                                symbol.qualified_name,
+                                symbol.kind.value,
+                                symbol.span.start_line,
+                                symbol.span.end_line,
+                                symbol.span.start_byte,
+                                symbol.span.end_byte,
+                                symbol.signature,
+                                symbol.parent_qualified_name,
+                            ),
+                        )
+                        assert cursor.lastrowid is not None
+                        symbol_ids[symbol.qualified_name] = int(cursor.lastrowid)
+
+                code_unit_ids: dict[str, int] = {}
+                fts_meta: dict[str, tuple[str, str, str, str | None]] = {}
+                for relative in insert_paths:
+                    result = analyzed[relative]
+                    for unit in sorted(
+                        result.code_units, key=lambda item: item.symbol_qualified_name
+                    ):
+                        symbol = next(
+                            item
+                            for item in result.symbols
+                            if item.qualified_name == unit.symbol_qualified_name
+                        )
+                        cursor = self.connection.execute(
+                            """
+                            INSERT INTO code_units(
+                                symbol_id, kind, source_text,
+                                start_line, end_line, start_byte, end_byte
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                symbol_ids[unit.symbol_qualified_name],
+                                unit.kind.value,
+                                unit.source_text,
+                                unit.span.start_line,
+                                unit.span.end_line,
+                                unit.span.start_byte,
+                                unit.span.end_byte,
+                            ),
+                        )
+                        assert cursor.lastrowid is not None
+                        code_unit_ids[unit.symbol_qualified_name] = int(cursor.lastrowid)
+                        fts_meta[unit.symbol_qualified_name] = (
+                            relative,
+                            result.module_name,
+                            symbol.name,
+                            symbol.signature,
+                        )
+
+                relation_rows = [_relation_to_row(relation, root) for relation in relations]
+                if global_relation_refresh:
+                    self._insert_relations(relation_rows, file_id_by_path)
+                else:
+                    self._insert_relations(relation_rows, file_id_by_path)
+
+                for qname, rowid in sorted(code_unit_ids.items()):
+                    relative, module_name, name, signature = fts_meta[qname]
+                    unit_kind = next(
+                        unit.kind.value
+                        for relative_path in insert_paths
+                        for unit in analyzed[relative_path].code_units
+                        if unit.symbol_qualified_name == qname
+                    )
+                    source_text = next(
+                        unit.source_text
+                        for relative_path in insert_paths
+                        for unit in analyzed[relative_path].code_units
+                        if unit.symbol_qualified_name == qname
+                    )
+                    self.connection.execute(
+                        """
+                        INSERT INTO code_units_fts(
+                            rowid, qualified_name, name, signature, source_text,
+                            module_name, path, kind
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            rowid,
+                            qname,
+                            name,
+                            signature or "",
+                            source_text,
+                            module_name,
+                            relative,
+                            unit_kind,
+                        ),
+                    )
+        except sqlite3.Error as exc:
+            raise IndexDatabaseError(
+                f"Failed to apply incremental index update: {self.path}"
+            ) from exc
+        return self.counts()
 
     def counts(self) -> IndexStats:
         conn = self.connection
@@ -192,10 +400,7 @@ class IndexDatabase:
         )
 
     def load_persisted_code_units(self) -> dict[str, PersistedCodeUnitView]:
-        """Return returnable CodeUnits keyed by ``symbol_qualified_name``.
-
-        MODULE symbols are absent because they have no CodeUnit rows.
-        """
+        """Return returnable CodeUnits keyed by ``symbol_qualified_name``."""
         rows = self.connection.execute(
             """
             SELECT
@@ -228,11 +433,11 @@ class IndexDatabase:
             )
         return units
 
-    def load_files(self) -> tuple[tuple[str, str, str, bool], ...]:
-        """Return ``(path, language_id, module_name, has_syntax_errors)``."""
+    def load_files(self) -> tuple[tuple[str, str, str, bool, str], ...]:
+        """Return ``(path, language_id, module_name, has_syntax_errors, content_sha256)``."""
         rows = self.connection.execute(
             """
-            SELECT path, language_id, module_name, has_syntax_errors
+            SELECT path, language_id, module_name, has_syntax_errors, content_sha256
             FROM files
             ORDER BY path
             """
@@ -243,9 +448,82 @@ class IndexDatabase:
                 str(row["language_id"]),
                 str(row["module_name"]),
                 bool(row["has_syntax_errors"]),
+                str(row["content_sha256"]),
             )
             for row in rows
         )
+
+    def load_file_analysis_views(self) -> dict[str, FileAnalysisView]:
+        """Return persisted per-file analysis views keyed by relative path."""
+        file_rows = self.connection.execute(
+            """
+            SELECT id, path, language_id, module_name, has_syntax_errors, content_sha256
+            FROM files
+            ORDER BY path
+            """
+        ).fetchall()
+        symbols_by_file: dict[int, list[Symbol]] = {}
+        symbol_rows = self.connection.execute(
+            """
+            SELECT file_id, name, qualified_name, kind, start_line, end_line,
+                   start_byte, end_byte, signature, parent_qualified_name
+            FROM symbols
+            ORDER BY qualified_name
+            """
+        ).fetchall()
+        for row in symbol_rows:
+            symbols_by_file.setdefault(int(row["file_id"]), []).append(_symbol_from_row(row))
+
+        units_by_file: dict[int, list[CodeUnit]] = {}
+        unit_rows = self.connection.execute(
+            """
+            SELECT s.file_id AS file_id, s.qualified_name AS qualified_name,
+                   c.kind AS kind, c.source_text AS source_text,
+                   c.start_line AS start_line, c.end_line AS end_line,
+                   c.start_byte AS start_byte, c.end_byte AS end_byte
+            FROM code_units AS c
+            JOIN symbols AS s ON s.id = c.symbol_id
+            ORDER BY s.qualified_name
+            """
+        ).fetchall()
+        for row in unit_rows:
+            units_by_file.setdefault(int(row["file_id"]), []).append(
+                CodeUnit(
+                    symbol_qualified_name=str(row["qualified_name"]),
+                    kind=SymbolKind(str(row["kind"])),
+                    source_text=str(row["source_text"]),
+                    span=_span_from_row(row),
+                )
+            )
+
+        views: dict[str, FileAnalysisView] = {}
+        for row in file_rows:
+            file_id = int(row["id"])
+            path = str(row["path"])
+            views[path] = FileAnalysisView(
+                path=path,
+                language_id=str(row["language_id"]),
+                module_name=str(row["module_name"]),
+                has_syntax_errors=bool(row["has_syntax_errors"]),
+                content_sha256=str(row["content_sha256"]),
+                symbols=tuple(symbols_by_file.get(file_id, ())),
+                code_units=tuple(units_by_file.get(file_id, ())),
+            )
+        return views
+
+    def code_unit_id_map(self) -> dict[str, int]:
+        """Return mapping of symbol qualified_name → code_units.id."""
+        rows = self.connection.execute(
+            """
+            SELECT s.qualified_name AS qualified_name, c.id AS id
+            FROM code_units AS c
+            JOIN symbols AS s ON s.id = c.symbol_id
+            """
+        ).fetchall()
+        return {str(row["qualified_name"]): int(row["id"]) for row in rows}
+
+    def file_id_map(self) -> dict[str, int]:
+        return self._load_file_id_map()
 
     def _enable_foreign_keys(self) -> None:
         self.connection.execute("PRAGMA foreign_keys = ON")
@@ -274,18 +552,35 @@ class IndexDatabase:
                 raise IndexDatabaseError(
                     f"Index database is missing required tables: {', '.join(sorted(missing))}"
                 )
-            self.connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-            self.connection.commit()
-            return
+            # Legacy unversioned DB with tables is treated as unsupported for silent upgrade.
+            raise SchemaVersionError(
+                f"Unsupported index schema version 0 with existing tables; "
+                f"expected {SCHEMA_VERSION}. Run `aicode index --full` to rebuild."
+            )
+
+        if version == 1:
+            raise SchemaVersionError(
+                f"Unsupported index schema version 1; expected {SCHEMA_VERSION}. "
+                "Run `aicode index PATH --full` to rebuild."
+            )
 
         if version != SCHEMA_VERSION:
             raise SchemaVersionError(
-                f"Unsupported index schema version {version}; expected {SCHEMA_VERSION}"
+                f"Unsupported index schema version {version}; expected {SCHEMA_VERSION}. "
+                "Run `aicode index PATH --full` to rebuild."
             )
         missing = required - core_tables
         if missing:
             raise IndexDatabaseError(
                 f"Index database is missing required tables: {', '.join(sorted(missing))}"
+            )
+        columns = {
+            str(row[1]) for row in self.connection.execute("PRAGMA table_info(files)").fetchall()
+        }
+        if "content_sha256" not in columns:
+            raise SchemaVersionError(
+                f"Index schema version {SCHEMA_VERSION} is missing content_sha256. "
+                "Run `aicode index PATH --full` to rebuild."
             )
 
     def _application_table_names(self) -> set[str]:
@@ -308,15 +603,90 @@ class IndexDatabase:
             connection.rollback()
             raise
 
+    def _load_file_id_map(self) -> dict[str, int]:
+        rows = self.connection.execute("SELECT id, path FROM files").fetchall()
+        return {str(row["path"]): int(row["id"]) for row in rows}
+
+    def _delete_fts_for_paths(
+        self, paths: Sequence[str], file_id_by_path: Mapping[str, int]
+    ) -> None:
+        file_ids = [file_id_by_path[path] for path in paths if path in file_id_by_path]
+        if not file_ids:
+            return
+        placeholders = ",".join("?" for _ in file_ids)
+        rows = self.connection.execute(
+            f"""
+            SELECT c.id AS id
+            FROM code_units AS c
+            JOIN symbols AS s ON s.id = c.symbol_id
+            WHERE s.file_id IN ({placeholders})
+            """,
+            tuple(file_ids),
+        ).fetchall()
+        for row in rows:
+            self.connection.execute(
+                "DELETE FROM code_units_fts WHERE rowid = ?",
+                (int(row["id"]),),
+            )
+
+    def _delete_relations_for_paths(
+        self, paths: Sequence[str], file_id_by_path: Mapping[str, int]
+    ) -> None:
+        file_ids = [file_id_by_path[path] for path in paths if path in file_id_by_path]
+        if not file_ids:
+            return
+        placeholders = ",".join("?" for _ in file_ids)
+        self.connection.execute(
+            f"DELETE FROM relations WHERE file_id IN ({placeholders})",
+            tuple(file_ids),
+        )
+
+    def _delete_code_units_for_paths(
+        self, paths: Sequence[str], file_id_by_path: Mapping[str, int]
+    ) -> None:
+        file_ids = [file_id_by_path[path] for path in paths if path in file_id_by_path]
+        if not file_ids:
+            return
+        placeholders = ",".join("?" for _ in file_ids)
+        self.connection.execute(
+            f"""
+            DELETE FROM code_units
+            WHERE symbol_id IN (
+                SELECT id FROM symbols WHERE file_id IN ({placeholders})
+            )
+            """,
+            tuple(file_ids),
+        )
+
+    def _delete_symbols_for_paths(
+        self, paths: Sequence[str], file_id_by_path: Mapping[str, int]
+    ) -> None:
+        file_ids = [file_id_by_path[path] for path in paths if path in file_id_by_path]
+        if not file_ids:
+            return
+        placeholders = ",".join("?" for _ in file_ids)
+        self.connection.execute(
+            f"DELETE FROM symbols WHERE file_id IN ({placeholders})",
+            tuple(file_ids),
+        )
+
     def _insert_files(self, files: list[_FileRow]) -> dict[str, int]:
         file_ids: dict[str, int] = {}
         for row in files:
             cursor = self.connection.execute(
                 """
-                INSERT INTO files(path, language_id, module_name, has_syntax_errors)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO files(
+                    path, language_id, module_name, has_syntax_errors, content_sha256
+                )
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (row.path, row.language_id, row.module_name, int(row.has_syntax_errors)),
+                (
+                    row.path,
+                    row.language_id,
+                    row.module_name,
+                    int(row.has_syntax_errors),
+                    row.content_sha256,
+                ),
             )
             assert cursor.lastrowid is not None
             file_ids[row.path] = int(cursor.lastrowid)
@@ -431,6 +801,7 @@ class _FileRow:
     language_id: str
     module_name: str
     has_syntax_errors: bool
+    content_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -493,7 +864,14 @@ class _PreparedSnapshot:
     fts_rows: list[_FtsRow]
 
     @classmethod
-    def from_analysis(cls, analysis: RepositoryAnalysis) -> _PreparedSnapshot:
+    def from_analysis(
+        cls,
+        analysis: RepositoryAnalysis,
+        *,
+        content_hashes: Mapping[str, str] | None = None,
+    ) -> _PreparedSnapshot:
+        from codeintel.indexing import hash_file_bytes
+
         root = analysis.root.resolve()
         files: list[_FileRow] = []
         symbols: list[_SymbolRow] = []
@@ -509,12 +887,19 @@ class _PreparedSnapshot:
         file_entries.sort(key=lambda item: item[0])
 
         for relative, result in file_entries:
+            if content_hashes is not None and relative in content_hashes:
+                digest = content_hashes[relative]
+            elif result.path is not None:
+                digest = hash_file_bytes(result.path)
+            else:
+                raise IndexDatabaseError(f"Missing content hash for indexed file {relative}")
             files.append(
                 _FileRow(
                     path=relative,
                     language_id=result.language_id,
                     module_name=result.module_name,
                     has_syntax_errors=result.has_syntax_errors,
+                    content_sha256=digest,
                 )
             )
             for symbol in sorted(result.symbols, key=lambda item: item.qualified_name):
@@ -608,6 +993,23 @@ class _PreparedSnapshot:
             relations=relations,
             fts_rows=fts_rows,
         )
+
+
+def _relation_to_row(relation: Relation, root: Path) -> _RelationRow:
+    relative = _relative_posix_path(relation.path, root)
+    span = relation.span
+    return _RelationRow(
+        source_qualified_name=relation.source_qualified_name,
+        target_qualified_name=relation.target_qualified_name,
+        target_text=relation.target_text,
+        kind=relation.kind.value,
+        resolution=relation.resolution.value,
+        relative_path=relative,
+        start_line=span.start_line if span is not None else None,
+        end_line=span.end_line if span is not None else None,
+        start_byte=span.start_byte if span is not None else None,
+        end_byte=span.end_byte if span is not None else None,
+    )
 
 
 def _relative_posix_path(path: Path, root: Path) -> str:

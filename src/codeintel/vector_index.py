@@ -125,6 +125,39 @@ class FaissVectorIndex:
             )
         return self.search(query, limit=self.size)
 
+    def reconstruct(self, ordinal: int) -> NDArray[np.float32]:
+        """Return the stored L2-normalized vector at ``ordinal``."""
+        if ordinal < 0 or ordinal >= self.size:
+            raise VectorIndexError(
+                f"FAISS reconstruct ordinal {ordinal} out of range for size {self.size}"
+            )
+        vector = np.asarray(self._index.reconstruct(ordinal), dtype=np.float32)
+        if vector.shape != (self._dimension,):
+            raise VectorIndexError(
+                f"Reconstructed vector has shape {vector.shape}, expected ({self._dimension},)"
+            )
+        if not np.all(np.isfinite(vector)):
+            raise VectorIndexError("Reconstructed vector contains non-finite values")
+        return vector
+
+    def reconstruct_n(self, start: int, count: int) -> NDArray[np.float32]:
+        """Return ``count`` consecutive reconstructed vectors starting at ``start``."""
+        if start < 0 or count < 0 or start + count > self.size:
+            raise VectorIndexError(
+                f"FAISS reconstruct_n range [{start}, {start + count}) invalid for size {self.size}"
+            )
+        if count == 0:
+            return np.zeros((0, self._dimension), dtype=np.float32)
+        matrix = np.asarray(self._index.reconstruct_n(start, count), dtype=np.float32)
+        if matrix.shape != (count, self._dimension):
+            raise VectorIndexError(
+                f"reconstruct_n returned shape {matrix.shape}, "
+                f"expected ({count}, {self._dimension})"
+            )
+        if not np.all(np.isfinite(matrix)):
+            raise VectorIndexError("Reconstructed vectors contain non-finite values")
+        return matrix
+
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self._index, str(path))

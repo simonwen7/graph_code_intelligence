@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEFAULT_INDEX_DIRNAME = ".codeintel"
 DEFAULT_INDEX_FILENAME = "index.db"
@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS files (
     path TEXT NOT NULL UNIQUE,
     language_id TEXT NOT NULL,
     module_name TEXT NOT NULL,
-    has_syntax_errors INTEGER NOT NULL CHECK (has_syntax_errors IN (0, 1))
+    has_syntax_errors INTEGER NOT NULL CHECK (has_syntax_errors IN (0, 1)),
+    content_sha256 TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_module_name ON files(module_name);

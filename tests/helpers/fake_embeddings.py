@@ -39,6 +39,8 @@ class FakeEmbeddingProvider:
         self._default_query = (
             self._as_vector(default_query) if default_query is not None else self._unit(0)
         )
+        self.document_embed_calls = 0
+        self.documents_embedded = 0
 
     @property
     def provider_id(self) -> str:
@@ -53,6 +55,8 @@ class FakeEmbeddingProvider:
         return self._dimension
 
     def embed_documents(self, texts: Sequence[str]) -> NDArray[np.floating]:
+        self.document_embed_calls += 1
+        self.documents_embedded += len(texts)
         rows = [self._document_vectors.get(text, self._default_document) for text in texts]
         if not rows:
             return np.zeros((0, self._dimension), dtype=np.float32)

@@ -255,7 +255,7 @@ def test_missing_corrupt_version_model_mismatch(tmp_path: Path) -> None:
             load_and_validate_dense_artifact(database, provider, artifact_dir=artifact_dir)
 
         # restore valid metadata then corrupt FAISS
-        build_dense_index(database, provider, artifact_dir=artifact_dir)
+        build_dense_index(database, provider, artifact_dir=artifact_dir, full=True)
         (artifact_dir / "index.faiss").write_bytes(b"corrupt")
         with pytest.raises(Exception, match="FAISS|Failed|Corrupt|load"):
             search_dense(database, provider, "x", artifact_dir=artifact_dir)
@@ -404,6 +404,7 @@ def test_failed_rebuild_preserves_previous_artifact(tmp_path: Path) -> None:
                 database,
                 BoomProvider(dimension=2, default_document=[1.0, 0.0], default_query=[1.0, 0.0]),
                 artifact_dir=artifact_dir,
+                full=True,
             )
         assert (artifact_dir / "metadata.json").read_text(encoding="utf-8") == original_meta
         assert (artifact_dir / "index.faiss").read_bytes() == original_faiss
