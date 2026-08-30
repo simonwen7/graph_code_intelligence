@@ -27,7 +27,14 @@ from codeintel.graph import CodeGraph
 from codeintel.hybrid import search_hybrid
 from codeintel.languages.python import PythonAdapter, PythonRelationExtractor
 from codeintel.lexical import search_code_units
-from codeintel.models import AnalysisResult, Relation, SearchResult, SymbolKind
+from codeintel.models import (
+    AnalysisResult,
+    Relation,
+    RerankedResult,
+    RerankExplanation,
+    SearchResult,
+    SymbolKind,
+)
 from codeintel.repository import RepositoryAnalysis, analyze_repository
 from codeintel.storage import (
     IndexDatabase,
@@ -50,6 +57,7 @@ class SearchMode(StrEnum):
     DENSE = "dense"
     HYBRID = "hybrid"
     GRAPH = "graph"
+    RERANKED = "reranked"
 
 
 @app.callback()
@@ -235,7 +243,10 @@ def search_command(
         SearchMode,
         typer.Option(
             "--mode",
-            help="Retrieval mode: lexical, dense, hybrid, or graph (graph-augmented hybrid).",
+            help=(
+                "Retrieval mode: lexical, dense, hybrid, graph "
+                "(graph-augmented hybrid), or reranked."
+            ),
         ),
     ] = SearchMode.LEXICAL,
     limit: Annotated[int, typer.Option("--limit", min=1, help="Maximum number of results.")] = 10,
@@ -250,6 +261,13 @@ def search_command(
         str | None,
         typer.Option("--path-prefix", help="Optional repository-relative path prefix filter."),
     ] = None,
+    explain: Annotated[
+        bool,
+        typer.Option(
+            "--explain",
+            help="Print structured rerank explanations (requires --mode reranked).",
+        ),
+    ] = False,
 ) -> None:
     """Search a previously built persistent CodeUnit index."""
     if not path.exists():
@@ -257,6 +275,13 @@ def search_command(
         raise typer.Exit(code=1)
     if not path.is_dir():
         typer.echo("Error: search expects a repository directory, not a file.", err=True)
+        raise typer.Exit(code=1)
+
+    if explain and mode is not SearchMode.RERANKED:
+        typer.echo(
+            "Error: --explain is only supported with --mode reranked.",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
     if not query.strip():
@@ -294,16 +319,40 @@ def search_command(
                     kind=symbol_kind,
                     path_prefix=path_prefix,
                 )
-            else:
-                results = _search_with_embeddings(
+                if not results:
+                    typer.echo("No matching code units.")
+                    raise typer.Exit(code=0)
+                for rank, result in enumerate(results, start=1):
+                    _print_search_result(rank, result)
+                return
+
+            if mode is SearchMode.RERANKED:
+                reranked = _search_reranked(
                     database,
                     query,
-                    mode=mode,
                     artifact_dir=artifact_dir,
                     limit=limit,
                     kind=symbol_kind,
                     path_prefix=path_prefix,
                 )
+                if not reranked:
+                    typer.echo("No matching code units.")
+                    raise typer.Exit(code=0)
+                for rank, item in enumerate(reranked, start=1):
+                    _print_search_result(rank, item.result)
+                    if explain:
+                        _print_rerank_explanation(item.explanation)
+                return
+
+            results = _search_with_embeddings(
+                database,
+                query,
+                mode=mode,
+                artifact_dir=artifact_dir,
+                limit=limit,
+                kind=symbol_kind,
+                path_prefix=path_prefix,
+            )
     except EmbeddingDependencyError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -381,9 +430,48 @@ def _search_with_embeddings(
             kind=kind,
             path_prefix=path_prefix,
         )
-    from codeintel.graph_retrieval import search_graph_augmented
+    if mode is SearchMode.GRAPH:
+        from codeintel.graph_retrieval import search_graph_augmented
 
-    return search_graph_augmented(
+        return search_graph_augmented(
+            database,
+            provider,
+            query,
+            artifact_dir=artifact_dir,
+            limit=limit,
+            kind=kind,
+            path_prefix=path_prefix,
+        )
+    raise ValueError(f"Unsupported embedding search mode: {mode.value}")
+
+
+def _search_reranked(
+    database: IndexDatabase,
+    query: str,
+    *,
+    artifact_dir: Path,
+    limit: int,
+    kind: SymbolKind | None,
+    path_prefix: str | None,
+) -> tuple[RerankedResult, ...]:
+    import json
+
+    from codeintel.reranking import search_reranked
+
+    metadata_path = artifact_dir / "metadata.json"
+    if not metadata_path.is_file():
+        raise DenseIndexMissingError(
+            f"Dense artifact is missing under {artifact_dir}. Run `aicode embed` to build it."
+        )
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DenseIndexError(f"Corrupt dense metadata at {metadata_path}") from exc
+    if not isinstance(metadata, dict) or "model_id" not in metadata:
+        raise DenseIndexError(f"Corrupt dense metadata at {metadata_path}")
+
+    provider = create_embedding_provider(str(metadata["model_id"]))
+    return search_reranked(
         database,
         provider,
         query,
@@ -402,6 +490,29 @@ def _print_search_result(rank: int, result: SearchResult) -> None:
     typer.echo(f"   {result.path.as_posix()}:L{result.span.start_line}-{result.span.end_line}")
     typer.echo(f"   signature: {signature}")
     typer.echo(f"   preview: {preview}")
+
+
+def _print_rerank_explanation(explanation: RerankExplanation) -> None:
+    delta = explanation.rank_delta
+    delta_text = f"+{delta}" if delta > 0 else str(delta)
+    typer.echo(
+        f"   rerank: #{explanation.original_rank} -> #{explanation.final_rank} (delta {delta_text})"
+    )
+    typer.echo("   contributions:")
+    for contribution in explanation.contributions:
+        typer.echo(
+            "     "
+            f"{contribution.source.value} rank={contribution.rank} "
+            f"rrf={contribution.rrf_contribution:.6f}"
+        )
+    if explanation.relation_evidence:
+        typer.echo("   evidence:")
+        for evidence in explanation.relation_evidence:
+            typer.echo(
+                "     "
+                f"{evidence.seed_qualified_name} [rank {evidence.seed_rank}] "
+                f"{evidence.relation_kind.value} {evidence.direction.value}"
+            )
 
 
 def _source_preview(source_text: str, *, max_chars: int = 120) -> str:

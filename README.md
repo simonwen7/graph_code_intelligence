@@ -34,7 +34,7 @@ The planned evaluation compares retrieval strategies along an ablation ladder:
 4. **Hybrid + Code Graph** — graph expansion over static relationships between symbols and files
 5. **Hybrid + Graph + Structured Reranking + Context Compilation** — full engine with token-budget-aware context assembly
 
-This ladder is the planned ablation and evaluation direction. Milestone 5 adds **graph-augmented hybrid retrieval** as a fourth comparable method. Lexical, dense, and hybrid baselines remain unchanged and graph-independent. Structured reranking and explainability remain Milestone 6.
+This ladder is the planned ablation and evaluation direction. Milestone 5 adds **graph-augmented hybrid retrieval** as a fourth comparable method. Milestone 6 adds **structured reranking with deterministic explanations** as a fifth mode. Lexical, dense, hybrid, and graph baselines remain unchanged. Context compilation remains Milestone 7.
 
 ## Target Architecture
 
@@ -57,7 +57,7 @@ flowchart TD
 
 ## Current Status
 
-The project is at **Milestone 5 — Graph-Augmented Retrieval**.
+The project is at **Milestone 6 — Structured Reranking & Explainability**.
 
 Verified capabilities today:
 
@@ -89,15 +89,21 @@ Verified capabilities today:
 - Included graph relations: `CALLS`, `REFERENCES`, `INHERITS`, `CONTAINS` (both directions)
 - Excluded from graph retrieval: `IMPORTS`, `PROBABLE`, `UNRESOLVED`; MODULE nodes not returned
 - Unique-seed structural support `Σ 1/(60 + seed_rank)` then final Hybrid+Graph RRF (`k=60`)
-- `aicode search --mode lexical|dense|hybrid|graph` (default remains lexical)
+- Structured reranking (`search --mode reranked`) over Graph candidates only (no new expansion)
+- Candidate depth `max(20, 5 * limit)`; Hybrid top-10 seeds reconstructed for provenance
+- Relation-specific evidence channels (CALLS/REFERENCES/INHERITS/CONTAINS, RESOLVED only)
+- Equal-weight final RRF over Graph ranking + nonempty evidence lists (`k=60`)
+- `RerankedResult` + `RerankExplanation` with rank delta, RRF contributions, relation evidence
+- `aicode search --mode lexical|dense|hybrid|graph|reranked` (default remains lexical)
+- Optional `--explain` (reranked mode only) for compact structured provenance
 - Deterministic module-name derivation and source-file discovery
-- Fixture-backed parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, and CLI tests
+- Fixture-backed parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, reranking, and CLI tests
 - Unit tests with pytest
 - Linting and formatting with Ruff
 - Strict static typing with mypy
 - GitHub Actions CI on push and pull request
 
-Structured reranking, context compilation, incremental indexing, and LLM answer generation are not implemented yet.
+Context compilation, incremental indexing, and LLM answer generation are not implemented yet.
 
 ## Current Capabilities
 
@@ -117,6 +123,8 @@ uv run aicode search PATH QUERY
 uv run aicode search PATH QUERY --mode dense
 uv run aicode search PATH QUERY --mode hybrid
 uv run aicode search PATH QUERY --mode graph
+uv run aicode search PATH QUERY --mode reranked
+uv run aicode search PATH QUERY --mode reranked --explain
 ```
 
 Expected version output:
@@ -133,7 +141,7 @@ aicode 0.1.0
 
 `aicode embed` builds/rebuilds the dense FAISS artifact from an **existing** SQLite index (it does not run `index` automatically). Default artifact directory: `PATH/.codeintel/dense/`. Requires the optional `embeddings` extra. Default model: `sentence-transformers/all-MiniLM-L6-v2`. Overrides: `--db`, `--dense-dir`, `--model`.
 
-`aicode search PATH QUERY` searches a previously built index (default `PATH/.codeintel/index.db`, overridable with `--db`). It does not reindex automatically. Default `--mode` is `lexical` (unchanged from Milestone 3). Dense/hybrid/graph modes require a dense artifact (`aicode embed`) and the embeddings extra. Optional `--limit`, `--kind`, `--path-prefix`, and `--dense-dir` are supported.
+`aicode search PATH QUERY` searches a previously built index (default `PATH/.codeintel/index.db`, overridable with `--db`). It does not reindex automatically. Default `--mode` is `lexical` (unchanged from Milestone 3). Dense/hybrid/graph/reranked modes require a dense artifact (`aicode embed`) and the embeddings extra. Optional `--limit`, `--kind`, `--path-prefix`, and `--dense-dir` are supported. `--explain` prints structured rerank provenance and is valid only with `--mode reranked`.
 
 ### Language adapter and semantic extraction
 
@@ -234,6 +242,19 @@ Hybrid retrieval fuses lexical and dense ranked lists with Reciprocal Rank Fusio
 
 Conservative policy rationale: keep ablation clean, bound expansion (no depth-2 / module fan-out), and avoid uncertain PROBABLE edges and noisy IMPORTS in the first structural baseline.
 
+### Structured reranking and explainability
+
+`--mode reranked` sits **after** Graph-Augmented retrieval and does **not** expand new candidates:
+
+1. Retrieve Graph candidates with depth `max(20, 5 * limit)` (canonical original ranks)
+2. Reconstruct Hybrid top-10 seeds (same filters) for structured provenance
+3. Extract RESOLVED `CALLS` / `REFERENCES` / `INHERITS` / `CONTAINS` evidence between seeds and Graph candidates only
+4. Build up to four relation-specific rankings via `RelationSupport = Σ 1/(60 + seed_rank)` (unique seeds per kind)
+5. Fuse original Graph ranking + nonempty evidence lists with equal-weight RRF (`k=60`)
+6. Return `RerankedResult` wrapping `SearchResult` plus `RerankExplanation` (rank delta, exact RRF contributions, relation evidence)
+
+No relation-type numeric weights, locality/kind/degree boosts, IMPORTS/PROBABLE evidence, cross-encoder, or LLM prose. `--explain` formats the structured explanation compactly on the CLI.
+
 The real embedding stack is an **optional** extra:
 
 ```bash
@@ -256,8 +277,15 @@ Baseline limitations:
 - graph expansion is direct one-hop only (no depth-2)
 - only RESOLVED edges; IMPORTS and PROBABLE excluded from graph retrieval
 - no relation-type-specific weights
-- no structured reranking / user-facing graph explanations yet
-- no cross-encoder yet
+- reranked mode requires Graph → Hybrid → Dense artifacts
+- reranked candidate depth increases query work (Graph + Hybrid seed reconstruction)
+- equal evidence-channel weights are a fixed heuristic baseline, not calibrated ranking
+- no IMPORTS / PROBABLE / same-file / same-module / SymbolKind / degree boosts in reranking
+- no new graph expansion in M6 (Graph candidate set is closed)
+- no structured reranking beyond the Graph+evidence RRF baseline
+- no cross-encoder / learned reranker
+- no LLM explanation generation
+- no token-budget context compilation yet (Milestone 7)
 - no benchmark improvement claims yet
 
 ## Technology Stack
@@ -286,7 +314,7 @@ Baseline limitations:
 
 | Technology | Planned role |
 |------------|--------------|
-| Structured reranker / explainability | Milestone 6 |
+| Structured reranker / explainability | Milestone 6 (current) |
 | Context compiler | Milestone 7 |
 | Incremental indexing | Milestone 8 |
 | C++ language adapter | Milestone 9 |
@@ -314,6 +342,7 @@ graph_code_intelligence/
 │       ├── lexical.py
 │       ├── models.py
 │       ├── repository.py
+│       ├── reranking.py
 │       ├── vector_index.py
 │       ├── languages/
 │       │   ├── __init__.py
@@ -332,6 +361,7 @@ graph_code_intelligence/
 │   │   ├── python_dense/
 │   │   ├── python_graph/
 │   │   ├── python_graph_search/
+│   │   ├── python_rerank/
 │   │   ├── python_repo/
 │   │   └── python_search/
 │   ├── helpers/
@@ -341,7 +371,8 @@ graph_code_intelligence/
 │   │   ├── test_graph_cli.py
 │   │   ├── test_graph_search_cli.py
 │   │   ├── test_index_search_cli.py
-│   │   └── test_inspect_cli.py
+│   │   ├── test_inspect_cli.py
+│   │   └── test_reranked_search_cli.py
 │   └── unit/
 │       ├── test_cli.py
 │       ├── test_dense.py
@@ -350,6 +381,7 @@ graph_code_intelligence/
 │       ├── test_graph.py
 │       ├── test_graph_retrieval.py
 │       ├── test_hybrid.py
+│       ├── test_reranking.py
 │       ├── test_language_adapter.py
 │       ├── test_lexical.py
 │       ├── test_models.py
@@ -412,6 +444,8 @@ uv run aicode search PATH QUERY
 uv run aicode search PATH QUERY --mode dense
 uv run aicode search PATH QUERY --mode hybrid
 uv run aicode search PATH QUERY --mode graph
+uv run aicode search PATH QUERY --mode reranked
+uv run aicode search PATH QUERY --mode reranked --explain
 ```
 
 Expected version output:
@@ -459,7 +493,7 @@ Run each check independently:
 uv run pytest
 ```
 
-Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, SQLite persistence, lexical BM25 search, dense/hybrid/graph retrieval with a fake embedding provider, and CLI inspect/graph/index/embed/search behavior. Default pytest does **not** download embedding models.
+Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, SQLite persistence, lexical BM25 search, dense/hybrid/graph/reranked retrieval with a fake embedding provider, and CLI inspect/graph/index/embed/search behavior. Default pytest does **not** download embedding models.
 
 ```bash
 uv run ruff check .
@@ -500,8 +534,8 @@ The workflow is configured in this repository and runs on GitHub for pushes and 
 | 2 | Static Relationships & Code Graph | Complete |
 | 3 | Persistent Index & Lexical Retrieval | Complete |
 | 4 | Dense & Hybrid Retrieval | Complete |
-| 5 | Graph-Augmented Retrieval | **Current** |
-| 6 | Structured Reranking & Explainability | Planned |
+| 5 | Graph-Augmented Retrieval | Complete |
+| 6 | Structured Reranking & Explainability | **Current** |
 | 7 | Token-Budget Context Compiler | Planned |
 | 8 | Incremental Indexing | Planned |
 | 9 | C++ Language Adapter | Planned |

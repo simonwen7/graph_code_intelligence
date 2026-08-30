@@ -119,8 +119,9 @@ class SearchResult:
 
     ``score`` is always higher-is-better within the retrieval method that
     produced the result (lexical BM25 uses ``-raw_sqlite_bm25``, dense uses
-    cosine similarity, hybrid uses RRF, graph-augmented uses Hybrid+Graph RRF).
-    Scores are not probabilities and are not comparable across retrieval modes.
+    cosine similarity, hybrid uses RRF, graph-augmented uses Hybrid+Graph RRF,
+    reranked uses Graph+relation-evidence RRF). Scores are not probabilities
+    and are not comparable across retrieval modes.
     """
 
     symbol_qualified_name: str
@@ -130,3 +131,68 @@ class SearchResult:
     signature: str | None
     source_text: str
     score: float
+
+
+class EvidenceDirection(StrEnum):
+    """Traversal-relative direction between a Hybrid seed and a candidate."""
+
+    SEED_TO_CANDIDATE = "seed_to_candidate"
+    CANDIDATE_TO_SEED = "candidate_to_seed"
+
+
+class ContributionSource(StrEnum):
+    """Ranked-list source contributing to a reranked RRF score."""
+
+    GRAPH_BASE = "graph_base"
+    CALLS = "calls"
+    REFERENCES = "references"
+    INHERITS = "inherits"
+    CONTAINS = "contains"
+
+
+@dataclass(frozen=True, slots=True)
+class RelationEvidence:
+    """One structured structural edge supporting a reranked candidate."""
+
+    seed_qualified_name: str
+    seed_rank: int
+    relation_kind: RelationKind
+    direction: EvidenceDirection
+
+    def __post_init__(self) -> None:
+        if self.seed_rank < 1:
+            raise ValueError("seed_rank must be >= 1")
+
+
+@dataclass(frozen=True, slots=True)
+class RankContribution:
+    """One equal-weight RRF contribution from a ranked evidence list."""
+
+    source: ContributionSource
+    rank: int
+    rrf_contribution: float
+
+    def __post_init__(self) -> None:
+        if self.rank < 1:
+            raise ValueError("rank must be >= 1")
+        if self.rrf_contribution <= 0:
+            raise ValueError("rrf_contribution must be > 0")
+
+
+@dataclass(frozen=True, slots=True)
+class RerankExplanation:
+    """Deterministic structured provenance for one reranked result."""
+
+    original_rank: int
+    final_rank: int
+    rank_delta: int
+    contributions: tuple[RankContribution, ...]
+    relation_evidence: tuple[RelationEvidence, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RerankedResult:
+    """Graph candidate wrapped with structured rerank explanation."""
+
+    result: SearchResult
+    explanation: RerankExplanation
