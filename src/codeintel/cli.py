@@ -25,7 +25,7 @@ from codeintel.embeddings import (
 )
 from codeintel.graph import CodeGraph
 from codeintel.hybrid import search_hybrid
-from codeintel.languages.python import PythonAdapter, PythonRelationExtractor
+from codeintel.languages.selection import SourceLanguage, create_language_tools
 from codeintel.lexical import search_code_units
 from codeintel.models import (
     AnalysisResult,
@@ -42,6 +42,11 @@ from codeintel.storage import (
     SchemaVersionError,
     default_index_path,
 )
+
+_KIND_HELP = "Optional SymbolKind filter (module, namespace, class, function, method)."
+_KIND_ERROR = "Error: --kind must be one of: module, namespace, class, function, method."
+_LANGUAGE_HELP = "Source language for analysis (default: python). One language per index."
+
 
 app = typer.Typer(
     name="aicode",
@@ -72,13 +77,19 @@ def version() -> None:
 
 
 @app.command("inspect")
-def inspect_command(path: Path) -> None:
-    """Inspect Symbols and CodeUnits extracted from Python source."""
+def inspect_command(
+    path: Path,
+    language: Annotated[
+        SourceLanguage,
+        typer.Option("--language", help=_LANGUAGE_HELP),
+    ] = SourceLanguage.PYTHON,
+) -> None:
+    """Inspect Symbols and CodeUnits extracted from source files."""
     if not path.exists():
         typer.echo(f"Error: path does not exist: {path}", err=True)
         raise typer.Exit(code=1)
 
-    adapter = PythonAdapter()
+    adapter, _extractor = create_language_tools(language)
     try:
         files = discover_source_files(path, adapter)
     except OSError as exc:
@@ -86,7 +97,8 @@ def inspect_command(path: Path) -> None:
         raise typer.Exit(code=1) from exc
 
     if not files:
-        typer.echo(f"No supported Python source files found under: {path}")
+        label = "Python" if language is SourceLanguage.PYTHON else "C++"
+        typer.echo(f"No supported {label} source files found under: {path}")
         raise typer.Exit(code=0)
 
     repository_root = path if path.is_dir() else None
@@ -105,6 +117,10 @@ def graph_command(
             help="Show incoming and outgoing relations for one qualified name.",
         ),
     ] = None,
+    language: Annotated[
+        SourceLanguage,
+        typer.Option("--language", help=_LANGUAGE_HELP),
+    ] = SourceLanguage.PYTHON,
 ) -> None:
     """Inspect the in-memory code graph for a repository directory."""
     if not path.exists():
@@ -114,14 +130,16 @@ def graph_command(
         typer.echo("Error: graph analysis expects a repository directory, not a file.", err=True)
         raise typer.Exit(code=1)
 
+    adapter, extractor = create_language_tools(language)
     try:
-        analysis = analyze_repository(path, PythonAdapter(), PythonRelationExtractor())
+        analysis = analyze_repository(path, adapter, extractor)
     except (OSError, ValueError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
     if not analysis.files:
-        typer.echo(f"No supported Python source files found under: {path}")
+        label = "Python" if language is SourceLanguage.PYTHON else "C++"
+        typer.echo(f"No supported {label} source files found under: {path}")
         raise typer.Exit(code=0)
 
     if symbol is not None:
@@ -143,13 +161,18 @@ def index_command(
         typer.Option(
             "--full",
             help=(
-                "Force a full schema-v2 rebuild (required to upgrade unsupported schema versions)."
+                "Force a full schema-v2 rebuild (required to upgrade unsupported schema versions "
+                "or intentionally switch index language)."
             ),
         ),
     ] = False,
+    language: Annotated[
+        SourceLanguage,
+        typer.Option("--language", help=_LANGUAGE_HELP),
+    ] = SourceLanguage.PYTHON,
 ) -> None:
     """Build or incrementally update a persistent SQLite lexical index."""
-    from codeintel.indexing import index_repository
+    from codeintel.indexing import IndexLanguageError, index_repository
 
     if not path.exists():
         typer.echo(f"Error: path does not exist: {path}", err=True)
@@ -158,16 +181,20 @@ def index_command(
         typer.echo("Error: index expects a repository directory, not a file.", err=True)
         raise typer.Exit(code=1)
 
+    adapter, extractor = create_language_tools(language)
     database_path = db if db is not None else default_index_path(path)
     try:
         stats = index_repository(
             path,
-            PythonAdapter(),
-            PythonRelationExtractor(),
+            adapter,
+            extractor,
             database_path=database_path,
             full=full,
         )
     except SchemaVersionError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except IndexLanguageError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     except (OSError, ValueError, IndexDatabaseError) as exc:
@@ -298,7 +325,7 @@ def search_command(
         str | None,
         typer.Option(
             "--kind",
-            help="Optional SymbolKind filter (module, class, function, method).",
+            help=_KIND_HELP,
         ),
     ] = None,
     path_prefix: Annotated[
@@ -348,7 +375,7 @@ def search_command(
             symbol_kind = SymbolKind(kind)
         except ValueError as exc:
             typer.echo(
-                "Error: --kind must be one of: module, class, function, method.",
+                _KIND_ERROR,
                 err=True,
             )
             raise typer.Exit(code=1) from exc
@@ -588,7 +615,7 @@ def context_command(
         str | None,
         typer.Option(
             "--kind",
-            help="Optional SymbolKind filter (module, class, function, method).",
+            help=_KIND_HELP,
         ),
     ] = None,
     path_prefix: Annotated[
@@ -628,7 +655,7 @@ def context_command(
             symbol_kind = SymbolKind(kind)
         except ValueError as exc:
             typer.echo(
-                "Error: --kind must be one of: module, class, function, method.",
+                _KIND_ERROR,
                 err=True,
             )
             raise typer.Exit(code=1) from exc
@@ -699,6 +726,7 @@ def _source_preview(source_text: str, *, max_chars: int = 120) -> str:
 def _print_analysis_result(result: AnalysisResult) -> None:
     location = str(result.path) if result.path is not None else "<memory>"
     typer.echo(f"file: {location}")
+    typer.echo(f"language: {result.language_id}")
     typer.echo(f"module: {result.module_name}")
     typer.echo(f"syntax_errors: {str(result.has_syntax_errors).lower()}")
     typer.echo(f"symbols: {len(result.symbols)}")

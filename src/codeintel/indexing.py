@@ -28,6 +28,10 @@ from codeintel.storage.database import (
 from codeintel.storage.schema import SCHEMA_VERSION
 
 
+class IndexLanguageError(ValueError):
+    """Raised when an incremental index request switches language without --full."""
+
+
 def hash_file_bytes(path: Path) -> str:
     """Return lowercase hex SHA-256 of raw file bytes."""
     import hashlib
@@ -142,6 +146,24 @@ def discover_and_hash(
     return discovered, hashes
 
 
+def _ensure_index_language_matches(
+    selected_language_id: str,
+    persisted_files: Sequence[tuple[str, str, str, bool, str]],
+) -> None:
+    """Fail before mutation when an incremental run switches language."""
+    languages = sorted({language_id for _, language_id, _, _, _ in persisted_files})
+    if not languages:
+        return
+    unexpected = [language_id for language_id in languages if language_id != selected_language_id]
+    if not unexpected:
+        return
+    existing = ", ".join(languages)
+    raise IndexLanguageError(
+        f"Index contains {existing} sources but --language {selected_language_id} was requested. "
+        f"Run with --full to intentionally rebuild the index for {selected_language_id}."
+    )
+
+
 def index_repository(
     root: Path,
     adapter: LanguageAdapter,
@@ -240,8 +262,10 @@ def _incremental_index(
                 f"Unsupported index schema version {database.schema_version()}; "
                 f"expected {SCHEMA_VERSION}. Run `aicode index {root} --full`."
             )
+        persisted_files = database.load_files()
+        _ensure_index_language_matches(adapter.language_id, persisted_files)
         persisted_hashes = {
-            path: content_sha256 for path, _, _, _, content_sha256 in database.load_files()
+            path: content_sha256 for path, _, _, _, content_sha256 in persisted_files
         }
         old_symbols = database.load_symbols()
         unchanged_views = database.load_file_analysis_views()

@@ -11,6 +11,7 @@ class SymbolKind(StrEnum):
     """Kinds of extracted program symbols."""
 
     MODULE = "module"
+    NAMESPACE = "namespace"
     CLASS = "class"
     FUNCTION = "function"
     METHOD = "method"

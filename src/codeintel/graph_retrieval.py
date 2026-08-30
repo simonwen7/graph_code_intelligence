@@ -117,7 +117,7 @@ def _collect_graph_supports(
             if not graph.has_symbol(neighbor):
                 continue
             symbol = graph.get_symbol(neighbor)
-            if symbol.kind is SymbolKind.MODULE:
+            if symbol.kind is SymbolKind.MODULE or symbol.kind is SymbolKind.NAMESPACE:
                 continue
             unit = returnable.get(neighbor)
             if unit is None:

@@ -34,7 +34,7 @@ The planned evaluation compares retrieval strategies along an ablation ladder:
 4. **Hybrid + Code Graph** — graph expansion over static relationships between symbols and files
 5. **Hybrid + Graph + Structured Reranking + Context Compilation** — full engine with token-budget-aware context assembly
 
-This ladder is the planned ablation and evaluation direction. Milestone 8 adds **incremental SQLite indexing** and **selective dense vector reuse**. Lexical through context-compiler query-time baselines remain unchanged. C++ and optional LLM integration remain later milestones.
+This ladder is the planned ablation and evaluation direction. Milestone 9 adds a **C++ LanguageAdapter** under single-language-per-index mode while preserving shared M3–M8 retrieval, ranking, context, and incremental indexing. Optional LLM integration remains Milestone 10.
 
 ## Target Architecture
 
@@ -57,21 +57,28 @@ flowchart TD
 
 ## Current Status
 
-The project is at **Milestone 8 — Incremental Indexing**.
+The project is at **Milestone 9 — C++ Language Adapter**.
 
 Verified capabilities today:
 
 - Python 3.14 project managed with [uv](https://docs.astral.sh/uv/)
 - `src/`-layout Python package (`codeintel`)
 - Typer CLI with `aicode version`, `aicode inspect`, `aicode graph`, `aicode index`, `aicode embed`, `aicode search`, and `aicode context`
-- Tree-sitter Python parsing isolated behind a thin parser wrapper
-- `PythonAdapter` semantic extraction into language-neutral `Symbol` and `CodeUnit` models
+- `--language python|cpp` on `inspect` / `graph` / `index` (default **python**)
+- Single-language index snapshots (Python **or** C++; not mixed)
+- Incremental language mismatch fails clearly; `index --language … --full` replaces safely
+- Tree-sitter Python + C++ parsing isolated behind language packages
+- `PythonAdapter` and `CppAdapter` semantic extraction into language-neutral `Symbol` / `CodeUnit` models
+- `SymbolKind.NAMESPACE` for C++ syntactic namespace containers (not CodeUnits)
+- C++ overload-safe callable qnames (parameter-type identity; names/defaults excluded)
+- C++ definitions-only callable policy; headers indexed; prototypes skipped
+- Conservative C++ `IMPORTS` / `CALLS` / `INHERITS` (no C++ `REFERENCES` in M9)
 - Repository-level symbol indexing and duplicate qualified-name detection
 - Static `CONTAINS`, `IMPORTS`, `REFERENCES`, `CALLS`, and `INHERITS` relations
 - Conservative Python lexical-scope analysis with `RESOLVED` / `PROBABLE` / `UNRESOLVED` status
 - In-memory `CodeGraph` with incoming/outgoing adjacency, filtering, bounded BFS, and shortest distance
 - SQLite persistent index (`PRAGMA user_version = 2`) with `files.content_sha256` (raw-byte SHA-256)
-- Incremental `aicode index` by default; `aicode index --full` for recovery / schema upgrade
+- Incremental `aicode index` by default; `aicode index --full` for recovery / schema upgrade / language switch
 - Schema v1 databases require explicit `--full` rebuild (no silent migration)
 - Deterministic `FileChangeSet` (added/changed/deleted/unchanged); rename = delete+add
 - Analyze only added/changed files; preserve unchanged Symbols/CodeUnits/FTS row ids
@@ -82,9 +89,9 @@ Verified capabilities today:
 - Explicit index → dense stale lifecycle (search rejects stale corpus fingerprint until re-embed)
 - Persisted files, Symbols, CodeUnits, and Relations using repository-relative POSIX paths
 - FTS5 one-document-per-CodeUnit indexing with the `unicode61` tokenizer
-- BM25 lexical retrieval with higher-is-better `SearchResult.score` (`score = -raw_bm25`)
+- BM25 lexical retrieval with higher-is-better `SearchResult.score` (`score = -raw_sqlite_bm25`)
 - Safe ordinary-text query construction (quoted tokens joined with `OR`)
-- Optional `SymbolKind` and path-prefix search filters
+- Optional `SymbolKind` and path-prefix search filters (`namespace` included; no namespace CodeUnits)
 - `EmbeddingProvider` abstraction with optional Sentence Transformers provider
 - Default local model `sentence-transformers/all-MiniLM-L6-v2` (general semantic baseline, not code-specialized)
 - Deterministic offline fake embedding provider for tests (no model download in CI)
@@ -96,7 +103,7 @@ Verified capabilities today:
 - Graph-augmented hybrid retrieval (`search --mode graph`) over persisted CodeGraph
 - Graph seeds: top 10 Hybrid results; direct depth-1 RESOLVED neighbors only
 - Included graph relations: `CALLS`, `REFERENCES`, `INHERITS`, `CONTAINS` (both directions)
-- Excluded from graph retrieval: `IMPORTS`, `PROBABLE`, `UNRESOLVED`; MODULE nodes not returned
+- Excluded from graph retrieval: `IMPORTS`, `PROBABLE`, `UNRESOLVED`; MODULE/NAMESPACE nodes not returned
 - Unique-seed structural support `Σ 1/(60 + seed_rank)` then final Hybrid+Graph RRF (`k=60`)
 - Structured reranking (`search --mode reranked`) over Graph candidates only (no new expansion)
 - Candidate depth `max(20, 5 * limit)`; Hybrid top-10 seeds reconstructed for provenance
@@ -111,13 +118,13 @@ Verified capabilities today:
 - Optional `--explain` (reranked mode only) for compact structured provenance
 - `aicode context PATH QUERY --budget N` (required budget; CLI pool = top 20 reranked)
 - Deterministic module-name derivation and source-file discovery
-- Fixture-backed parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, reranking, context, and CLI tests
+- Fixture-backed Python and C++ parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, reranking, context, incremental, and CLI tests
 - Unit tests with pytest
 - Linting and formatting with Ruff
 - Strict static typing with mypy
 - GitHub Actions CI on push and pull request
 
-Incremental indexing is implemented for SQLite + selective dense reuse. LLM answer generation is not implemented yet.
+Milestone 8 incremental indexing and Milestone 9 C++ adapter are implemented. LLM answer generation is not implemented yet.
 
 ## Current Capabilities
 
@@ -129,10 +136,14 @@ Commands currently available:
 uv run aicode --help
 uv run aicode version
 uv run aicode inspect PATH
+uv run aicode inspect PATH --language cpp
 uv run aicode graph PATH
+uv run aicode graph PATH --language cpp
 uv run aicode graph PATH --symbol QUALIFIED_NAME
 uv run aicode index PATH
+uv run aicode index PATH --language cpp
 uv run aicode index PATH --full
+uv run aicode index PATH --language cpp --full
 uv run aicode embed PATH
 uv run aicode embed PATH --full
 uv run aicode search PATH QUERY
@@ -150,11 +161,11 @@ Expected version output:
 aicode 0.1.0
 ```
 
-`aicode inspect` accepts a Python file or a directory. It discovers supported files, analyzes each through `PythonAdapter`, and prints module names, syntax-error status, Symbols, and CodeUnit summaries.
+`aicode inspect` accepts a file or directory. Default `--language python`. With `--language cpp` it uses `CppAdapter` over C++ extensions. It prints language id, module names, syntax-error status, Symbols, and CodeUnit summaries.
 
-`aicode graph` expects a **repository directory**. It builds a repository-level symbol index and in-memory CodeGraph, then prints relation summaries. `--symbol` shows incoming and outgoing edges for one qualified name. This inspection command is separate from retrieval `--mode graph`.
+`aicode graph` expects a **repository directory**. Default language is Python. `--language cpp` builds a C++ repository graph. `--symbol` shows incoming and outgoing edges for one qualified name (quote C++ qnames containing `::` in the shell). This inspection command is separate from retrieval `--mode graph`.
 
-`aicode index` expects a **repository directory**. Default behavior is **incremental** against an existing schema-v2 SQLite DB (`PATH/.codeintel/index.db`, overridable with `--db`). Missing DBs perform an initial full schema-v2 build. Unsupported schema versions (including v1) fail clearly and require `aicode index PATH --full`. `--full` analyzes the whole repository into a temporary DB and atomically replaces the target only on success. Indexing does **not** run `embed`.
+`aicode index` expects a **repository directory**. Default `--language python`. One index snapshot is always a single language. Incremental runs refuse to switch languages without `--full`. `--full` analyzes the whole repository into a temporary DB and atomically replaces the target only on success. Indexing does **not** run `embed`.
 
 `aicode embed` builds/rebuilds the dense FAISS artifact from an **existing** SQLite index (it does not run `index` automatically). Default artifact directory: `PATH/.codeintel/dense/`. Requires the optional `embeddings` extra. Default model: `sentence-transformers/all-MiniLM-L6-v2`. Overrides: `--db`, `--dense-dir`, `--model`. Default embed **reuses** eligible old Flat vectors when per-document fingerprints match; `--full` re-embeds every document.
 
@@ -166,7 +177,9 @@ aicode 0.1.0
 
 `LanguageAdapter` defines language identity, supported extensions, file-support detection, and `analyze_file(...)`.
 
-`PythonAdapter` currently extracts:
+A small `create_language_tools(language)` helper maps `python` / `cpp` to one adapter + relation extractor pair. There is no multi-language registry and no mixed-language index in M9.
+
+`PythonAdapter` extracts:
 
 - module, class, function, and method Symbols
 - nested functions (classified as `FUNCTION`, not `METHOD`)
@@ -174,6 +187,30 @@ aicode 0.1.0
 - declaration signatures
 - exact source spans and CodeUnit text (no MODULE CodeUnits)
 - `has_syntax_errors` for malformed Python without crashing analysis
+
+`CppAdapter` (`language_id = "cpp"`) extracts:
+
+- extensions: `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hh`, `.hxx` (not `.c`)
+- `module_name` = repository-relative POSIX path **including** extension
+- file-root `MODULE` qname `@file:<relative-path>` (no MODULE CodeUnit)
+- syntactic `NAMESPACE` containers `@namespace:<path>:<ordinal>:<semantic-path>` (no CodeUnit)
+- `struct` → `CLASS`; class/struct **definitions with bodies** are CodeUnits (forward declarations like `class Foo;` skipped)
+- callable **definitions with bodies only** (prototypes skipped)
+- overload-safe qnames with canonical parameter **types** (names/defaults excluded; return type excluded)
+- member `const` / `volatile` / `&` / `&&` in METHOD identity; `noexcept` / `override` / `final` not in qname
+- constructors / destructors / operators as METHOD/FUNCTION with overload-safe params
+- file-local `@filelocal:<path>::…` for `static` free functions; anonymous-namespace symbols use `@filelocal:<path>::…::<anonymous>::…` (reopened anonymous blocks share that semantic marker; synthetic NAMESPACE nodes still use occurrence ordinals)
+- deferred (parse-safe, no first-class Symbol/CodeUnit): templates, enum, union, lambda
+- same-file out-of-class `Foo::bar` → METHOD when class known in-file; cross-file remains FUNCTION with qualified qname
+- Tree-sitter error policy mirrors M1 (`has_syntax_errors = root.has_error`)
+
+C++ relation baseline (`CppRelationExtractor`):
+
+- `CONTAINS` still repository-derived from `parent_qualified_name`
+- `#include` → `IMPORTS` (quoted local resolution only; `<…>` always unresolved)
+- conservative `CALLS` (unique bare/qualified RESOLVED; overload ambiguity UNRESOLVED; `Foo::bar` / `this->bar` PROBABLE; `obj.bar` / `ptr->bar` UNRESOLVED)
+- `INHERITS` for base clauses (unique CLASS RESOLVED; otherwise UNRESOLVED)
+- **no C++ `REFERENCES`** in M9
 
 Tree-sitter `Tree` / `Node` objects do not leak into the semantic models or CLI output.
 
@@ -364,8 +401,9 @@ Baseline limitations:
 | Python 3.14 | Runtime |
 | uv | Dependency and environment management |
 | Typer | CLI framework |
-| Tree-sitter | Python syntax parsing |
+| Tree-sitter | Syntax parsing runtime |
 | tree-sitter-python | Python grammar |
+| tree-sitter-cpp | C++ grammar (`==0.23.4`) |
 | SQLite / FTS5 | Persistent index and lexical BM25 retrieval (stdlib `sqlite3`) |
 | NumPy | Dense vector arrays |
 | FAISS (`faiss-cpu`) | Exact `IndexFlatIP` dense index |
@@ -381,10 +419,6 @@ Baseline limitations:
 
 | Technology | Planned role |
 |------------|--------------|
-| Structured reranker / explainability | Milestone 6 |
-| Context compiler | Milestone 7 |
-| Incremental indexing | Milestone 8 (current) |
-| C++ language adapter | Milestone 9 |
 | Benchmark suite / optional LLM | Milestone 10 |
 
 Sentence Transformers is optional and is **not** installed by default `uv sync`.
@@ -416,9 +450,16 @@ graph_code_intelligence/
 │       ├── languages/
 │       │   ├── __init__.py
 │       │   ├── base.py
-│       │   └── python/
+│       │   ├── selection.py
+│       │   ├── python/
+│       │   │   ├── __init__.py
+│       │   │   ├── adapter.py
+│       │   │   ├── parser.py
+│       │   │   └── relations.py
+│       │   └── cpp/
 │       │       ├── __init__.py
 │       │       ├── adapter.py
+│       │       ├── naming.py
 │       │       ├── parser.py
 │       │       └── relations.py
 │       └── storage/
@@ -427,6 +468,8 @@ graph_code_intelligence/
 │           └── schema.py
 ├── tests/
 │   ├── fixtures/
+│   │   ├── cpp_graph/
+│   │   ├── cpp_repo/
 │   │   ├── python_dense/
 │   │   ├── python_graph/
 │   │   ├── python_graph_search/
@@ -609,10 +652,28 @@ The workflow is configured in this repository and runs on GitHub for pushes and 
 | 4 | Dense & Hybrid Retrieval | Complete |
 | 5 | Graph-Augmented Retrieval | Complete |
 | 6 | Structured Reranking & Explainability | Complete |
-| 7 | Token-Budget Context Compiler | **Current** |
-| 8 | Incremental Indexing | Planned |
-| 9 | C++ Language Adapter | Planned |
+| 7 | Token-Budget Context Compiler | Complete |
+| 8 | Incremental Indexing | Complete |
+| 9 | C++ Language Adapter | **Current** |
 | 10 | Benchmark Suite, Optional LLM Integration & Portfolio Polish | Planned |
+
+## C++ limitations (Milestone 9)
+
+M9 is a **syntax-only Tree-sitter C++ baseline**, not a compiler:
+
+- no mixed Python+C++ index (single language per index)
+- no C language adapter (`.c` excluded)
+- no first-class template / enum / union / lambda Symbols
+- no template instantiation
+- no clang / libclang / `compile_commands.json`
+- no macro expansion or conditional-compilation evaluation
+- no type inference or overload ranking (ambiguous calls stay unresolved)
+- angle-bracket includes always unresolved; no build-system include paths
+- no C++ `REFERENCES` edges in the first baseline
+- `using` / typedef aliases not resolved
+- cross-file out-of-class method definitions may remain `FUNCTION` when the class is not proven in the same file
+- no compiler-grade call graph / virtual dispatch claims
+- no benchmark or LLM claims yet (Milestone 10)
 
 ## Design Principles
 
