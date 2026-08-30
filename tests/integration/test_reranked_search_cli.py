@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from helpers.fake_embeddings import FakeEmbeddingProvider
+from typer._click.utils import strip_ansi  # type: ignore[attr-defined]
 from typer.testing import CliRunner
 
 from codeintel.cli import app
@@ -81,10 +82,11 @@ def test_reranked_cli_and_explain(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     )
     assert embedded.exit_code == 0, embedded.stdout + embedded.stderr
 
-    help_result = runner.invoke(app, ["search", "--help"])
+    help_result = runner.invoke(app, ["search", "--help"], color=False)
     assert help_result.exit_code == 0
-    assert "reranked" in help_result.stdout
-    assert "--explain" in help_result.stdout
+    help_text = strip_ansi(help_result.stdout)
+    assert "reranked" in help_text
+    assert "--explain" in help_text
 
     query = "authorize payment transfer"
     compact = runner.invoke(
