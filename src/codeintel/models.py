@@ -119,8 +119,8 @@ class SearchResult:
 
     ``score`` is always higher-is-better within the retrieval method that
     produced the result (lexical BM25 uses ``-raw_sqlite_bm25``, dense uses
-    cosine similarity, hybrid uses RRF). Scores are not probabilities and are
-    not comparable across retrieval modes.
+    cosine similarity, hybrid uses RRF, graph-augmented uses Hybrid+Graph RRF).
+    Scores are not probabilities and are not comparable across retrieval modes.
     """
 
     symbol_qualified_name: str

@@ -4,6 +4,7 @@ from codeintel.storage.database import (
     IndexDatabase,
     IndexDatabaseError,
     IndexStats,
+    PersistedCodeUnitView,
     SchemaVersionError,
 )
 from codeintel.storage.schema import SCHEMA_VERSION, default_index_path
@@ -13,6 +14,7 @@ __all__ = [
     "IndexDatabase",
     "IndexDatabaseError",
     "IndexStats",
+    "PersistedCodeUnitView",
     "SchemaVersionError",
     "default_index_path",
 ]

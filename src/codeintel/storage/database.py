@@ -41,6 +41,18 @@ class IndexStats:
     fts_documents: int
 
 
+@dataclass(frozen=True, slots=True)
+class PersistedCodeUnitView:
+    """Returnable CodeUnit snapshot fields for retrieval (includes file path)."""
+
+    symbol_qualified_name: str
+    kind: SymbolKind
+    path: Path
+    span: SourceSpan
+    signature: str | None
+    source_text: str
+
+
 class IndexDatabase:
     """Small SQLite-backed repository index with full-rebuild semantics."""
 
@@ -178,6 +190,43 @@ class IndexDatabase:
             )
             for row in rows
         )
+
+    def load_persisted_code_units(self) -> dict[str, PersistedCodeUnitView]:
+        """Return returnable CodeUnits keyed by ``symbol_qualified_name``.
+
+        MODULE symbols are absent because they have no CodeUnit rows.
+        """
+        rows = self.connection.execute(
+            """
+            SELECT
+                s.qualified_name AS qualified_name,
+                s.kind AS kind,
+                f.path AS path,
+                s.signature AS signature,
+                c.source_text AS source_text,
+                c.start_line AS start_line,
+                c.end_line AS end_line,
+                c.start_byte AS start_byte,
+                c.end_byte AS end_byte
+            FROM code_units AS c
+            JOIN symbols AS s ON s.id = c.symbol_id
+            JOIN files AS f ON f.id = s.file_id
+            ORDER BY s.qualified_name ASC
+            """
+        ).fetchall()
+        units: dict[str, PersistedCodeUnitView] = {}
+        for row in rows:
+            signature = row["signature"]
+            qname = str(row["qualified_name"])
+            units[qname] = PersistedCodeUnitView(
+                symbol_qualified_name=qname,
+                kind=SymbolKind(str(row["kind"])),
+                path=Path(str(row["path"])),
+                span=_span_from_row(row),
+                signature=None if signature is None else str(signature),
+                source_text=str(row["source_text"]),
+            )
+        return units
 
     def load_files(self) -> tuple[tuple[str, str, str, bool], ...]:
         """Return ``(path, language_id, module_name, has_syntax_errors)``."""

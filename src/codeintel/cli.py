@@ -49,6 +49,7 @@ class SearchMode(StrEnum):
     LEXICAL = "lexical"
     DENSE = "dense"
     HYBRID = "hybrid"
+    GRAPH = "graph"
 
 
 @app.callback()
@@ -232,7 +233,10 @@ def search_command(
     ] = None,
     mode: Annotated[
         SearchMode,
-        typer.Option("--mode", help="Retrieval mode: lexical, dense, or hybrid."),
+        typer.Option(
+            "--mode",
+            help="Retrieval mode: lexical, dense, hybrid, or graph (graph-augmented hybrid).",
+        ),
     ] = SearchMode.LEXICAL,
     limit: Annotated[int, typer.Option("--limit", min=1, help="Maximum number of results.")] = 10,
     kind: Annotated[
@@ -367,7 +371,19 @@ def _search_with_embeddings(
             kind=kind,
             path_prefix=path_prefix,
         )
-    return search_hybrid(
+    if mode is SearchMode.HYBRID:
+        return search_hybrid(
+            database,
+            provider,
+            query,
+            artifact_dir=artifact_dir,
+            limit=limit,
+            kind=kind,
+            path_prefix=path_prefix,
+        )
+    from codeintel.graph_retrieval import search_graph_augmented
+
+    return search_graph_augmented(
         database,
         provider,
         query,

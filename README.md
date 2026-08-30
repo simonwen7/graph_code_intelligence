@@ -34,7 +34,7 @@ The planned evaluation compares retrieval strategies along an ablation ladder:
 4. **Hybrid + Code Graph** — graph expansion over static relationships between symbols and files
 5. **Hybrid + Graph + Structured Reranking + Context Compilation** — full engine with token-budget-aware context assembly
 
-This ladder is the planned ablation and evaluation direction. Milestone 4 provides comparable **lexical**, **dense**, and **hybrid** retrieval baselines. An in-memory static CodeGraph exists as of Milestone 2 and can be reconstructed from persisted Symbols and Relations; it is **not** used for retrieval ranking yet (graph-augmented retrieval is Milestone 5).
+This ladder is the planned ablation and evaluation direction. Milestone 5 adds **graph-augmented hybrid retrieval** as a fourth comparable method. Lexical, dense, and hybrid baselines remain unchanged and graph-independent. Structured reranking and explainability remain Milestone 6.
 
 ## Target Architecture
 
@@ -57,7 +57,7 @@ flowchart TD
 
 ## Current Status
 
-The project is at **Milestone 4 — Dense & Hybrid Retrieval**.
+The project is at **Milestone 5 — Graph-Augmented Retrieval**.
 
 Verified capabilities today:
 
@@ -84,15 +84,20 @@ Verified capabilities today:
 - Vector identity by `symbol.qualified_name` ordinal mapping (not SQLite row ids)
 - Whole-corpus fingerprint stale protection for dense artifacts
 - Reciprocal Rank Fusion hybrid retrieval (`RRF_K = 60`, equal lexical/dense weights)
-- `aicode search --mode lexical|dense|hybrid` (default remains lexical)
+- Graph-augmented hybrid retrieval (`search --mode graph`) over persisted CodeGraph
+- Graph seeds: top 10 Hybrid results; direct depth-1 RESOLVED neighbors only
+- Included graph relations: `CALLS`, `REFERENCES`, `INHERITS`, `CONTAINS` (both directions)
+- Excluded from graph retrieval: `IMPORTS`, `PROBABLE`, `UNRESOLVED`; MODULE nodes not returned
+- Unique-seed structural support `Σ 1/(60 + seed_rank)` then final Hybrid+Graph RRF (`k=60`)
+- `aicode search --mode lexical|dense|hybrid|graph` (default remains lexical)
 - Deterministic module-name derivation and source-file discovery
-- Fixture-backed parser, relation, graph, persistence, lexical, dense, hybrid, and CLI tests
+- Fixture-backed parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, and CLI tests
 - Unit tests with pytest
 - Linting and formatting with Ruff
 - Strict static typing with mypy
 - GitHub Actions CI on push and pull request
 
-Graph-augmented retrieval, structured reranking, context compilation, incremental indexing, and LLM answer generation are not implemented yet.
+Structured reranking, context compilation, incremental indexing, and LLM answer generation are not implemented yet.
 
 ## Current Capabilities
 
@@ -111,6 +116,7 @@ uv run aicode embed PATH
 uv run aicode search PATH QUERY
 uv run aicode search PATH QUERY --mode dense
 uv run aicode search PATH QUERY --mode hybrid
+uv run aicode search PATH QUERY --mode graph
 ```
 
 Expected version output:
@@ -121,13 +127,13 @@ aicode 0.1.0
 
 `aicode inspect` accepts a Python file or a directory. It discovers supported files, analyzes each through `PythonAdapter`, and prints module names, syntax-error status, Symbols, and CodeUnit summaries.
 
-`aicode graph` expects a **repository directory**. It builds a repository-level symbol index and in-memory CodeGraph, then prints relation summaries. `--symbol` shows incoming and outgoing edges for one qualified name.
+`aicode graph` expects a **repository directory**. It builds a repository-level symbol index and in-memory CodeGraph, then prints relation summaries. `--symbol` shows incoming and outgoing edges for one qualified name. This inspection command is separate from retrieval `--mode graph`.
 
 `aicode index` expects a **repository directory**. It analyzes the repository, then writes a full SQLite snapshot to `PATH/.codeintel/index.db` by default (`--db` overrides). Indexing is a transactional full rebuild.
 
 `aicode embed` builds/rebuilds the dense FAISS artifact from an **existing** SQLite index (it does not run `index` automatically). Default artifact directory: `PATH/.codeintel/dense/`. Requires the optional `embeddings` extra. Default model: `sentence-transformers/all-MiniLM-L6-v2`. Overrides: `--db`, `--dense-dir`, `--model`.
 
-`aicode search PATH QUERY` searches a previously built index (default `PATH/.codeintel/index.db`, overridable with `--db`). It does not reindex automatically. Default `--mode` is `lexical` (unchanged from Milestone 3). Dense/hybrid modes require a dense artifact (`aicode embed`) and the embeddings extra. Optional `--limit`, `--kind`, `--path-prefix`, and `--dense-dir` are supported.
+`aicode search PATH QUERY` searches a previously built index (default `PATH/.codeintel/index.db`, overridable with `--db`). It does not reindex automatically. Default `--mode` is `lexical` (unchanged from Milestone 3). Dense/hybrid/graph modes require a dense artifact (`aicode embed`) and the embeddings extra. Optional `--limit`, `--kind`, `--path-prefix`, and `--dense-dir` are supported.
 
 ### Language adapter and semantic extraction
 
@@ -211,7 +217,22 @@ Hybrid retrieval fuses lexical and dense ranked lists with Reciprocal Rank Fusio
 - equal lexical and dense weights
 - per-retriever candidate depth `max(50, 5 * limit)`
 - deduplicate by `symbol_qualified_name`
-- graph relations are **not** used
+- graph relations are **not** used inside Hybrid (ablation integrity)
+
+### Graph-augmented retrieval
+
+`--mode graph` means **graph-augmented Hybrid**, not a replacement of Hybrid:
+
+1. Retrieve Hybrid base pool `max(10, limit)`
+2. Take top `GRAPH_SEED_COUNT = 10` Hybrid seeds
+3. Reconstruct `CodeGraph` from persisted SQLite Symbols/Relations (no live reparse)
+4. Expand **direct** (depth-1) neighbors in **both** directions for `CALLS`, `REFERENCES`, `INHERITS`, `CONTAINS`
+5. Keep only `RESOLVED` edges; exclude `IMPORTS`, `PROBABLE`, and `UNRESOLVED`
+6. Return only Symbols with persisted CodeUnits; never return MODULE nodes
+7. Aggregate unique supporting seed ranks: `GraphSupport = Σ 1/(60 + seed_rank)`
+8. Rank structural candidates by GraphSupport, then fuse Hybrid ranking + structural ranking with equal-weight RRF (`k=60`)
+
+Conservative policy rationale: keep ablation clean, bound expansion (no depth-2 / module fan-out), and avoid uncertain PROBABLE edges and noisy IMPORTS in the first structural baseline.
 
 The real embedding stack is an **optional** extra:
 
@@ -231,8 +252,12 @@ Baseline limitations:
 - MiniLM may truncate long inputs according to its own max sequence length; one CodeUnit remains one vector (no chunking)
 - FAISS baseline is exact `IndexFlatIP`, not ANN-tuned HNSW/IVF
 - scores are not comparable across retrieval modes
-- no graph-based ranking yet
-- no cross-encoder / structured reranking yet
+- graph mode requires a dense artifact because Hybrid is the base
+- graph expansion is direct one-hop only (no depth-2)
+- only RESOLVED edges; IMPORTS and PROBABLE excluded from graph retrieval
+- no relation-type-specific weights
+- no structured reranking / user-facing graph explanations yet
+- no cross-encoder yet
 - no benchmark improvement claims yet
 
 ## Technology Stack
@@ -261,8 +286,7 @@ Baseline limitations:
 
 | Technology | Planned role |
 |------------|--------------|
-| Graph-aware retrieval | Milestone 5 candidate expansion / ranking signals |
-| Structured reranker | Milestone 6 |
+| Structured reranker / explainability | Milestone 6 |
 | Context compiler | Milestone 7 |
 | Incremental indexing | Milestone 8 |
 | C++ language adapter | Milestone 9 |
@@ -285,6 +309,7 @@ graph_code_intelligence/
 │       ├── discovery.py
 │       ├── embeddings.py
 │       ├── graph.py
+│       ├── graph_retrieval.py
 │       ├── hybrid.py
 │       ├── lexical.py
 │       ├── models.py
@@ -306,6 +331,7 @@ graph_code_intelligence/
 │   ├── fixtures/
 │   │   ├── python_dense/
 │   │   ├── python_graph/
+│   │   ├── python_graph_search/
 │   │   ├── python_repo/
 │   │   └── python_search/
 │   ├── helpers/
@@ -313,6 +339,7 @@ graph_code_intelligence/
 │   ├── integration/
 │   │   ├── test_embed_search_cli.py
 │   │   ├── test_graph_cli.py
+│   │   ├── test_graph_search_cli.py
 │   │   ├── test_index_search_cli.py
 │   │   └── test_inspect_cli.py
 │   └── unit/
@@ -321,6 +348,7 @@ graph_code_intelligence/
 │       ├── test_discovery.py
 │       ├── test_embeddings_contract.py
 │       ├── test_graph.py
+│       ├── test_graph_retrieval.py
 │       ├── test_hybrid.py
 │       ├── test_language_adapter.py
 │       ├── test_lexical.py
@@ -383,6 +411,7 @@ uv run aicode embed PATH
 uv run aicode search PATH QUERY
 uv run aicode search PATH QUERY --mode dense
 uv run aicode search PATH QUERY --mode hybrid
+uv run aicode search PATH QUERY --mode graph
 ```
 
 Expected version output:
@@ -430,7 +459,7 @@ Run each check independently:
 uv run pytest
 ```
 
-Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, SQLite persistence, lexical BM25 search, dense/hybrid retrieval with a fake embedding provider, and CLI inspect/graph/index/embed/search behavior. Default pytest does **not** download embedding models.
+Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, SQLite persistence, lexical BM25 search, dense/hybrid/graph retrieval with a fake embedding provider, and CLI inspect/graph/index/embed/search behavior. Default pytest does **not** download embedding models.
 
 ```bash
 uv run ruff check .
@@ -470,8 +499,8 @@ The workflow is configured in this repository and runs on GitHub for pushes and 
 | 1 | Python Parsing & Semantic Units | Complete |
 | 2 | Static Relationships & Code Graph | Complete |
 | 3 | Persistent Index & Lexical Retrieval | Complete |
-| 4 | Dense & Hybrid Retrieval | **Current** |
-| 5 | Graph-Augmented Retrieval | Planned |
+| 4 | Dense & Hybrid Retrieval | Complete |
+| 5 | Graph-Augmented Retrieval | **Current** |
 | 6 | Structured Reranking & Explainability | Planned |
 | 7 | Token-Budget Context Compiler | Planned |
 | 8 | Incremental Indexing | Planned |
