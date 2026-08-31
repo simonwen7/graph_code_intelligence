@@ -1,0 +1,237 @@
+{
+  "evaluation_id": "incremental-work-v1",
+  "engine_version": "0.1.0",
+  "corpus_source": "benchmarks/python_retrieval_v1/corpus",
+  "baseline": {
+    "index": {
+      "mode": "full",
+      "files_added": 11,
+      "files_changed": 0,
+      "files_deleted": 0,
+      "files_unchanged": 0,
+      "files_analyzed": 11,
+      "relation_files_recomputed": 11,
+      "symbols_rewritten": 64,
+      "code_units_rewritten": 53,
+      "files": 11,
+      "symbols": 64,
+      "code_units": 53,
+      "relations": 123
+    },
+    "dense_initial_full": {
+      "provider_id": "fake",
+      "model_id": "fake-incremental-work",
+      "document_count": 53,
+      "vectors_reused": 0,
+      "vectors_embedded": 53,
+      "rewritten": true
+    }
+  },
+  "dense_provider_note": "Dense work counts use FakeEmbeddingProvider (fake-incremental-work). They measure reuse/embed work, not retrieval quality.",
+  "scenarios": [
+    {
+      "id": "no-op",
+      "description": "Unchanged corpus after baseline index.",
+      "incremental": {
+        "mode": "noop",
+        "files_added": 0,
+        "files_changed": 0,
+        "files_deleted": 0,
+        "files_unchanged": 11,
+        "files_analyzed": 0,
+        "relation_files_recomputed": 0,
+        "symbols_rewritten": 0,
+        "code_units_rewritten": 0,
+        "files": 11,
+        "symbols": 64,
+        "code_units": 53,
+        "relations": 123
+      },
+      "full": {
+        "mode": "full",
+        "files_added": 11,
+        "files_changed": 0,
+        "files_deleted": 0,
+        "files_unchanged": 0,
+        "files_analyzed": 11,
+        "relation_files_recomputed": 11,
+        "symbols_rewritten": 64,
+        "code_units_rewritten": 53,
+        "files": 11,
+        "symbols": 64,
+        "code_units": 53,
+        "relations": 123
+      },
+      "dense_selective": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 53,
+        "vectors_reused": 53,
+        "vectors_embedded": 0,
+        "rewritten": false
+      },
+      "dense_full": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 53,
+        "vectors_reused": 0,
+        "vectors_embedded": 53,
+        "rewritten": true
+      },
+      "semantic_equivalent": true
+    },
+    {
+      "id": "body-edit",
+      "description": "Comment-only body change in pricing.line_total_cents.",
+      "incremental": {
+        "mode": "incremental",
+        "files_added": 0,
+        "files_changed": 1,
+        "files_deleted": 0,
+        "files_unchanged": 10,
+        "files_analyzed": 1,
+        "relation_files_recomputed": 1,
+        "symbols_rewritten": 4,
+        "code_units_rewritten": 3,
+        "files": 11,
+        "symbols": 64,
+        "code_units": 53,
+        "relations": 123
+      },
+      "full": {
+        "mode": "full",
+        "files_added": 11,
+        "files_changed": 0,
+        "files_deleted": 0,
+        "files_unchanged": 0,
+        "files_analyzed": 11,
+        "relation_files_recomputed": 11,
+        "symbols_rewritten": 64,
+        "code_units_rewritten": 53,
+        "files": 11,
+        "symbols": 64,
+        "code_units": 53,
+        "relations": 123
+      },
+      "dense_selective": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 53,
+        "vectors_reused": 52,
+        "vectors_embedded": 1,
+        "rewritten": true
+      },
+      "dense_full": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 53,
+        "vectors_reused": 0,
+        "vectors_embedded": 53,
+        "rewritten": true
+      },
+      "semantic_equivalent": true
+    },
+    {
+      "id": "symbol-rename",
+      "description": "Rename pricing.line_total_cents \u2192 pricing.line_amount_cents.",
+      "incremental": {
+        "mode": "incremental",
+        "files_added": 0,
+        "files_changed": 2,
+        "files_deleted": 0,
+        "files_unchanged": 9,
+        "files_analyzed": 2,
+        "relation_files_recomputed": 11,
+        "symbols_rewritten": 14,
+        "code_units_rewritten": 12,
+        "files": 11,
+        "symbols": 64,
+        "code_units": 53,
+        "relations": 123
+      },
+      "full": {
+        "mode": "full",
+        "files_added": 11,
+        "files_changed": 0,
+        "files_deleted": 0,
+        "files_unchanged": 0,
+        "files_analyzed": 11,
+        "relation_files_recomputed": 11,
+        "symbols_rewritten": 64,
+        "code_units_rewritten": 53,
+        "files": 11,
+        "symbols": 64,
+        "code_units": 53,
+        "relations": 123
+      },
+      "dense_selective": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 53,
+        "vectors_reused": 51,
+        "vectors_embedded": 2,
+        "rewritten": true
+      },
+      "dense_full": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 53,
+        "vectors_reused": 0,
+        "vectors_embedded": 53,
+        "rewritten": true
+      },
+      "semantic_equivalent": true
+    },
+    {
+      "id": "add-delete",
+      "description": "Add audit.py and delete payments.py.",
+      "incremental": {
+        "mode": "incremental",
+        "files_added": 1,
+        "files_changed": 0,
+        "files_deleted": 1,
+        "files_unchanged": 10,
+        "files_analyzed": 1,
+        "relation_files_recomputed": 11,
+        "symbols_rewritten": 2,
+        "code_units_rewritten": 1,
+        "files": 11,
+        "symbols": 62,
+        "code_units": 51,
+        "relations": 118
+      },
+      "full": {
+        "mode": "full",
+        "files_added": 11,
+        "files_changed": 0,
+        "files_deleted": 0,
+        "files_unchanged": 0,
+        "files_analyzed": 11,
+        "relation_files_recomputed": 11,
+        "symbols_rewritten": 62,
+        "code_units_rewritten": 51,
+        "files": 11,
+        "symbols": 62,
+        "code_units": 51,
+        "relations": 118
+      },
+      "dense_selective": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 51,
+        "vectors_reused": 50,
+        "vectors_embedded": 1,
+        "rewritten": true
+      },
+      "dense_full": {
+        "provider_id": "fake",
+        "model_id": "fake-incremental-work",
+        "document_count": 51,
+        "vectors_reused": 0,
+        "vectors_embedded": 51,
+        "rewritten": true
+      },
+      "semantic_equivalent": true
+    }
+  ]
+}

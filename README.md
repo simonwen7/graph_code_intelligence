@@ -1,709 +1,274 @@
 # Graph-Augmented Code Intelligence Engine
 
-A graph-augmented code intelligence engine for structural code retrieval, ranking, and context compilation over large codebases.
+A local, LLM-optional code intelligence engine that retrieves **whole CodeUnits**
+using lexical search, dense embeddings, hybrid fusion, static code-graph
+augmentation, structured reranking, and token-budget context compilation.
 
-## Overview
+**Central question:** Can structural program information improve code retrieval
+compared with text-only retrieval?
 
-This project is building a code intelligence engine that combines:
+On the included frozen **24-query** Python benchmark
+(`python-structural-retrieval-v1`), with MiniLM embeddings and top-10 ranking:
 
-- static program structure
-- information retrieval
-- graph algorithms
-- structured ranking
-- context engineering
+| Mode | Hit@1 | Hit@5 | Hit@10 | MRR@10 |
+| --- | ---: | ---: | ---: | ---: |
+| lexical | 0.6667 | 0.8750 | 0.8750 | 0.7431 |
+| dense | 0.7917 | 0.8750 | 1.0000 | 0.8532 |
+| hybrid | 0.6667 | 0.8750 | 0.9583 | 0.7604 |
+| graph | 0.2500 | 0.8333 | 0.9583 | 0.4971 |
+| reranked | 0.2500 | 0.7500 | 0.9167 | 0.4241 |
 
-The LLM is not the engine itself. The engine is designed to work and be benchmarkable without requiring an LLM. An LLM, when used, consumes structured context produced by the engine rather than driving retrieval directly.
+**Graph vs Hybrid** first-relevant ranks: **wins=3, ties=7, losses=14**.
+**Reranked vs Graph**: **wins=2, ties=7, losses=15**.
 
-## Why This Project Exists
+On this included benchmark, **Dense achieved the strongest aggregate metrics**.
+**Graph underperformed Hybrid in aggregate**, and **Reranked underperformed Graph
+in aggregate**. That is a real measured outcome of the frozen M5/M6 fusion on
+this query set—not a claim that structural retrieval generally improves ranking.
 
-Traditional code RAG systems often treat source code primarily as text chunks. That approach ignores the structural relationships that engineers use when navigating a codebase: definitions, references, imports, call patterns, and module boundaries.
-
-This project investigates whether structural program information can improve retrieval and reasoning over large codebases.
-
-**Central question:** Can structural program information improve code retrieval compared with text-only retrieval?
-
-That question has not been answered yet. This repository documents the engineering path toward a measurable evaluation.
-
-## Core Technical Thesis
-
-The planned evaluation compares retrieval strategies along an ablation ladder:
-
-1. **Lexical retrieval** — keyword and phrase matching over source text
-2. **Dense retrieval** — embedding similarity over code or text representations
-3. **Hybrid retrieval** — fusion of lexical and dense signals
-4. **Hybrid + Code Graph** — graph expansion over static relationships between symbols and files
-5. **Hybrid + Graph + Structured Reranking + Context Compilation** — full engine with token-budget-aware context assembly
-
-This ladder is the planned ablation and evaluation direction. Milestone 9 adds a **C++ LanguageAdapter** under single-language-per-index mode while preserving shared M3–M8 retrieval, ranking, context, and incremental indexing. Optional LLM integration remains Milestone 10.
-
-## Target Architecture
-
-The following diagram describes the **target** end-to-end pipeline. It is not current functionality.
-
-```mermaid
-flowchart TD
-    A[Repository] --> B[Language Adapter]
-    B --> C[Static Analysis]
-    C --> D[Files / Symbols / Relationships]
-    D --> E[Code Graph]
-    E --> F[Lexical Index + Dense Index]
-    F --> G[Candidate Fusion]
-    G --> H[Graph Expansion]
-    H --> I[Structured Reranker]
-    I --> J[Context Compiler]
-    J --> K[Structured Context]
-    K --> L[CLI / Optional LLM]
-```
+These numbers are scoped to the included benchmark only. Full tables:
+[`benchmarks/results/python_retrieval_v1_minilm.md`](benchmarks/results/python_retrieval_v1_minilm.md).
 
 ## Current Status
 
-The project is at **Milestone 9 — C++ Language Adapter**.
+**Milestone 10 — Complete** (M0–M10).
 
-Verified capabilities today:
+Implemented today:
 
-- Python 3.14 project managed with [uv](https://docs.astral.sh/uv/)
-- `src/`-layout Python package (`codeintel`)
-- Typer CLI with `aicode version`, `aicode inspect`, `aicode graph`, `aicode index`, `aicode embed`, `aicode search`, and `aicode context`
-- `--language python|cpp` on `inspect` / `graph` / `index` (default **python**)
-- Single-language index snapshots (Python **or** C++; not mixed)
-- Incremental language mismatch fails clearly; `index --language … --full` replaces safely
-- Tree-sitter Python + C++ parsing isolated behind language packages
-- `PythonAdapter` and `CppAdapter` semantic extraction into language-neutral `Symbol` / `CodeUnit` models
-- `SymbolKind.NAMESPACE` for C++ syntactic namespace containers (not CodeUnits)
-- C++ overload-safe callable qnames (parameter-type identity; names/defaults excluded)
-- C++ definitions-only callable policy; headers indexed; prototypes skipped
-- Conservative C++ `IMPORTS` / `CALLS` / `INHERITS` (no C++ `REFERENCES` in M9)
-- Repository-level symbol indexing and duplicate qualified-name detection
-- Static `CONTAINS`, `IMPORTS`, `REFERENCES`, `CALLS`, and `INHERITS` relations
-- Conservative Python lexical-scope analysis with `RESOLVED` / `PROBABLE` / `UNRESOLVED` status
-- In-memory `CodeGraph` with incoming/outgoing adjacency, filtering, bounded BFS, and shortest distance
-- SQLite persistent index (`PRAGMA user_version = 2`) with `files.content_sha256` (raw-byte SHA-256)
-- Incremental `aicode index` by default; `aicode index --full` for recovery / schema upgrade / language switch
-- Schema v1 databases require explicit `--full` rebuild (no silent migration)
-- Deterministic `FileChangeSet` (added/changed/deleted/unchanged); rename = delete+add
-- Analyze only added/changed files; preserve unchanged Symbols/CodeUnits/FTS row ids
-- Resolution-surface local vs global relation refresh (no stale cross-file edges)
-- Exact index work stats (analyzed / relation files recomputed / rewritten counts)
-- Selective dense embedding reuse via per-document fingerprints + FAISS Flat reconstruction
-- `aicode embed --full` forces re-embed; artifact_version remains `1` with optional fingerprints
-- Explicit index → dense stale lifecycle (search rejects stale corpus fingerprint until re-embed)
-- Persisted files, Symbols, CodeUnits, and Relations using repository-relative POSIX paths
-- FTS5 one-document-per-CodeUnit indexing with the `unicode61` tokenizer
-- BM25 lexical retrieval with higher-is-better `SearchResult.score` (`score = -raw_sqlite_bm25`)
-- Safe ordinary-text query construction (quoted tokens joined with `OR`)
-- Optional `SymbolKind` and path-prefix search filters (`namespace` included; no namespace CodeUnits)
-- `EmbeddingProvider` abstraction with optional Sentence Transformers provider
-- Default local model `sentence-transformers/all-MiniLM-L6-v2` (general semantic baseline, not code-specialized)
-- Deterministic offline fake embedding provider for tests (no model download in CI)
-- FAISS `IndexFlatIP` exact dense search with L2-normalized cosine via inner product
-- Dense artifacts under `.codeintel/dense/` (`index.faiss` + `metadata.json`)
-- Vector identity by `symbol.qualified_name` ordinal mapping (not SQLite row ids)
-- Whole-corpus fingerprint stale protection for dense artifacts
-- Reciprocal Rank Fusion hybrid retrieval (`RRF_K = 60`, equal lexical/dense weights)
-- Graph-augmented hybrid retrieval (`search --mode graph`) over persisted CodeGraph
-- Graph seeds: top 10 Hybrid results; direct depth-1 RESOLVED neighbors only
-- Included graph relations: `CALLS`, `REFERENCES`, `INHERITS`, `CONTAINS` (both directions)
-- Excluded from graph retrieval: `IMPORTS`, `PROBABLE`, `UNRESOLVED`; MODULE/NAMESPACE nodes not returned
-- Unique-seed structural support `Σ 1/(60 + seed_rank)` then final Hybrid+Graph RRF (`k=60`)
-- Structured reranking (`search --mode reranked`) over Graph candidates only (no new expansion)
-- Candidate depth `max(20, 5 * limit)`; Hybrid top-10 seeds reconstructed for provenance
-- Relation-specific evidence channels (CALLS/REFERENCES/INHERITS/CONTAINS, RESOLVED only)
-- Equal-weight final RRF over Graph ranking + nonempty evidence lists (`k=60`)
-- `RerankedResult` + `RerankExplanation` with rank delta, RRF contributions, relation evidence
-- Pure `compile_context(Sequence[RerankedResult], token_budget, TokenCounter)` packing API
-- `TokenCounter` Protocol + dependency-free `SimpleTokenCounter` (`simple-lexical-v1` estimate)
-- Whole-CodeUnit atomic packing; greedy skip-to-fit; qname dedup; byte-span overlap suppression
-- `ContextBlock` / `CompiledContext` with final-text budget invariant `count(text) <= budget`
-- `aicode search --mode lexical|dense|hybrid|graph|reranked` (default remains lexical)
-- Optional `--explain` (reranked mode only) for compact structured provenance
-- `aicode context PATH QUERY --budget N` (required budget; CLI pool = top 20 reranked)
-- Deterministic module-name derivation and source-file discovery
-- Fixture-backed Python and C++ parser, relation, graph, persistence, lexical, dense, hybrid, graph-retrieval, reranking, context, incremental, and CLI tests
-- Unit tests with pytest
-- Linting and formatting with Ruff
-- Strict static typing with mypy
-- GitHub Actions CI on push and pull request
+- Python 3.14 + uv; Typer CLI (`aicode`)
+- Single-language index snapshots: `--language python|cpp` (default python)
+- Tree-sitter Python + C++ adapters → language-neutral Symbols / CodeUnits
+- Static relations + CodeGraph (`CONTAINS`, `IMPORTS`, `CALLS`, `REFERENCES`, `INHERITS`)
+- SQLite/FTS5 lexical index (schema v2) with incremental maintenance
+- FAISS FlatIP dense retrieval + selective vector reuse
+- Hybrid / graph-augmented / structured-reranked search ladder
+- Token-budget context compiler (estimated `simple-lexical-v1` units)
+- Frozen retrieval benchmark + exact incremental work-count evaluation
+- No LLM answer layer (CompiledContext is the downstream boundary)
 
-Milestone 8 incremental indexing and Milestone 9 C++ adapter are implemented. LLM answer generation is not implemented yet.
+## Architecture (current)
 
-## Current Capabilities
+```mermaid
+flowchart TD
+  subgraph maintain [Index / Maintenance]
+    R[Source repository] --> A[LanguageAdapter Python XOR C++]
+    A --> S[Symbols + CodeUnits]
+    S --> Rel[Relations / CodeGraph]
+    Rel --> DB[(SQLite / FTS5)]
+    DB --> D[Dense FAISS FlatIP]
+    H[SHA-256 file hashes] --> Inc[Selective re-analysis]
+    Inc --> RelRefresh[Relation refresh]
+    RelRefresh --> Tx[Transactional SQLite update]
+    Tx --> VecReuse[Selective vector reuse]
+    VecReuse --> D
+  end
 
-### CLI
+  subgraph query [Query path]
+    Q[Query] --> L[Lexical BM25]
+    Q --> Den[Dense cosine]
+    L --> Hyb[Hybrid RRF]
+    Den --> Hyb
+    Hyb --> G[Graph augmentation]
+    G --> RR[Structured reranking]
+    RR --> C[Token-budget context compiler]
+    C --> Out[CompiledContext]
+  end
 
-Commands currently available:
-
-```bash
-uv run aicode --help
-uv run aicode version
-uv run aicode inspect PATH
-uv run aicode inspect PATH --language cpp
-uv run aicode graph PATH
-uv run aicode graph PATH --language cpp
-uv run aicode graph PATH --symbol QUALIFIED_NAME
-uv run aicode index PATH
-uv run aicode index PATH --language cpp
-uv run aicode index PATH --full
-uv run aicode index PATH --language cpp --full
-uv run aicode embed PATH
-uv run aicode embed PATH --full
-uv run aicode search PATH QUERY
-uv run aicode search PATH QUERY --mode dense
-uv run aicode search PATH QUERY --mode hybrid
-uv run aicode search PATH QUERY --mode graph
-uv run aicode search PATH QUERY --mode reranked
-uv run aicode search PATH QUERY --mode reranked --explain
-uv run aicode context PATH QUERY --budget N
+  DB --> L
+  D --> Den
+  DB --> G
 ```
 
-Expected version output:
-
-```text
-aicode 0.1.0
-```
-
-`aicode inspect` accepts a file or directory. Default `--language python`. With `--language cpp` it uses `CppAdapter` over C++ extensions. It prints language id, module names, syntax-error status, Symbols, and CodeUnit summaries.
-
-`aicode graph` expects a **repository directory**. Default language is Python. `--language cpp` builds a C++ repository graph. `--symbol` shows incoming and outgoing edges for one qualified name (quote C++ qnames containing `::` in the shell). This inspection command is separate from retrieval `--mode graph`.
-
-`aicode index` expects a **repository directory**. Default `--language python`. One index snapshot is always a single language. Incremental runs refuse to switch languages without `--full`. `--full` analyzes the whole repository into a temporary DB and atomically replaces the target only on success. Indexing does **not** run `embed`.
-
-`aicode embed` builds/rebuilds the dense FAISS artifact from an **existing** SQLite index (it does not run `index` automatically). Default artifact directory: `PATH/.codeintel/dense/`. Requires the optional `embeddings` extra. Default model: `sentence-transformers/all-MiniLM-L6-v2`. Overrides: `--db`, `--dense-dir`, `--model`. Default embed **reuses** eligible old Flat vectors when per-document fingerprints match; `--full` re-embeds every document.
-
-`aicode search PATH QUERY` searches a previously built index (default `PATH/.codeintel/index.db`, overridable with `--db`). It does not reindex automatically. Default `--mode` is `lexical` (unchanged from Milestone 3). Dense/hybrid/graph/reranked modes require a dense artifact (`aicode embed`) and the embeddings extra. Optional `--limit`, `--kind`, `--path-prefix`, and `--dense-dir` are supported. `--explain` prints structured rerank provenance and is valid only with `--mode reranked`.
-
-`aicode context PATH QUERY --budget N` compiles a language-neutral context from the top **20** reranked candidates (`search_reranked` → `compile_context`). `--budget` is required and uses **estimated** `simple-lexical-v1` units (not a vendor LLM tokenizer). Supports `--db`, `--dense-dir`, `--kind`, and `--path-prefix`. Requires a dense artifact.
-
-### Language adapter and semantic extraction
-
-`LanguageAdapter` defines language identity, supported extensions, file-support detection, and `analyze_file(...)`.
-
-A small `create_language_tools(language)` helper maps `python` / `cpp` to one adapter + relation extractor pair. There is no multi-language registry and no mixed-language index in M9.
-
-`PythonAdapter` extracts:
-
-- module, class, function, and method Symbols
-- nested functions (classified as `FUNCTION`, not `METHOD`)
-- decorated and async definitions
-- declaration signatures
-- exact source spans and CodeUnit text (no MODULE CodeUnits)
-- `has_syntax_errors` for malformed Python without crashing analysis
-
-`CppAdapter` (`language_id = "cpp"`) extracts:
-
-- extensions: `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hh`, `.hxx` (not `.c`)
-- `module_name` = repository-relative POSIX path **including** extension
-- file-root `MODULE` qname `@file:<relative-path>` (no MODULE CodeUnit)
-- syntactic `NAMESPACE` containers `@namespace:<path>:<ordinal>:<semantic-path>` (no CodeUnit)
-- `struct` → `CLASS`; class/struct **definitions with bodies** are CodeUnits (forward declarations like `class Foo;` skipped)
-- callable **definitions with bodies only** (prototypes skipped)
-- overload-safe qnames with canonical parameter **types** (names/defaults excluded; return type excluded)
-- member `const` / `volatile` / `&` / `&&` in METHOD identity; `noexcept` / `override` / `final` not in qname
-- constructors / destructors / operators as METHOD/FUNCTION with overload-safe params
-- file-local `@filelocal:<path>::…` for `static` free functions; anonymous-namespace symbols use `@filelocal:<path>::…::<anonymous>::…` (reopened anonymous blocks share that semantic marker; synthetic NAMESPACE nodes still use occurrence ordinals)
-- deferred (parse-safe, no first-class Symbol/CodeUnit): templates, enum, union, lambda
-- same-file out-of-class `Foo::bar` → METHOD when class known in-file; cross-file remains FUNCTION with qualified qname
-- Tree-sitter error policy mirrors M1 (`has_syntax_errors = root.has_error`)
-
-C++ relation baseline (`CppRelationExtractor`):
-
-- `CONTAINS` still repository-derived from `parent_qualified_name`
-- `#include` → `IMPORTS` (quoted local resolution only; `<…>` always unresolved)
-- conservative `CALLS` (unique bare/qualified RESOLVED; overload ambiguity UNRESOLVED; `Foo::bar` / `this->bar` PROBABLE; `obj.bar` / `ptr->bar` UNRESOLVED)
-- `INHERITS` for base clauses (unique CLASS RESOLVED; otherwise UNRESOLVED)
-- **no C++ `REFERENCES`** in M9
-
-Tree-sitter `Tree` / `Node` objects do not leak into the semantic models or CLI output.
-
-### Static relationships and CodeGraph
-
-Repository analysis discovers Python files, runs Milestone 1 extraction, then builds a qualified-name symbol index **before** cross-file relation resolution.
-
-Implemented relation kinds:
-
-- **CONTAINS** — derived from existing Symbol parent links (`RESOLVED`)
-- **IMPORTS** — module-level import edges; repo-local names resolve, stdlib/third-party stay `UNRESOLVED`
-- **CALLS** — conservative lexical / import / `self` / `cls` call edges
-- **REFERENCES** — only when a use maps to a concrete repository Symbol; unknown locals/builtins are omitted
-- **INHERITS** — class base expressions, including multiple bases
-
-`DEFINES` is **not** emitted. With a Symbol-only graph it would duplicate `CONTAINS` without distinct semantics. It is deferred until binding/file-level definition modeling exists.
-
-Resolution is intentionally conservative:
-
-- same-module and imported callees may be `RESOLVED`
-- `self.method()` / `cls.method()` / `KnownClass.method()` are `PROBABLE` because of Python dynamic dispatch
-- inherited methods are not followed through MRO; `self.base_method()` stays `UNRESOLVED` unless that method is declared on the current class
-- star imports remain `UNRESOLVED` and do not bind names
-- assignment aliases, `global` / `nonlocal`, runtime imports, `getattr`, and monkeypatching are not modeled
-- there is no type inference and no execution of analyzed code
-- each Python file is parsed twice by design (symbol extraction, then relations)
-
-The in-memory CodeGraph uses `Symbol.qualified_name` as node identity. Unresolved relations are stored but do not create fake target nodes or participate in distance traversal.
-
-### Persistent index and lexical retrieval
-
-`IndexDatabase` stores a language-neutral snapshot of repository analysis in SQLite:
-
-- schema version via `PRAGMA user_version` (currently `2`)
-- `files.content_sha256` stores lowercase hex SHA-256 of **raw file bytes**
-- tables for files, symbols, code_units, and relations
-- repository-relative POSIX path identity for files
-- one FTS5 document per CodeUnit (`unicode61` tokenizer)
-- incremental transactional updates (and `--full` rebuild via temp DB + atomic replace)
-
-### Incremental indexing
-
-`index_repository(...)` discovers and hashes all supported source files, computes a `FileChangeSet`, analyzes only added/changed files, validates the proposed global symbol table, then applies one SQLite transaction.
-
-Relation refresh:
-
-- if the global resolution surface (`qualified_name` / `name` / `kind` / `parent_qualified_name`) is unchanged → recompute relations only for added/changed files
-- if the surface changes → re-extract relations for **all** current files against the proposed symbol table (unchanged files may be reparsed by the relation extractor; Symbol/CodeUnit rows for unchanged files are not rewritten)
-
-Dense reuse:
-
-- optional `document_fingerprints` in metadata (artifact_version remains `1`)
-- reuse requires matching qname + dense-document fingerprint + provider/model/dimension contract
-- reusable vectors are reconstructed from the previous `IndexFlatIP`, then a new Flat index is built in deterministic qname order
-- after SQLite changes, search continues to reject stale artifacts until `aicode embed` refreshes them
-
-`search_code_units(...)` performs BM25 retrieval. SQLite's raw `bm25(...)` ranks lower/more-negative as better; `SearchResult.score` exposes `-raw_bm25` so **higher score means better relevance** within that method. Scores are retrieval ranks, not probabilities, and are **not comparable across** lexical / dense / hybrid modes.
-
-Ordinary search queries are tokenized on whitespace, quoted as literal FTS phrases, and joined with `OR`. Raw FTS operator syntax is not exposed.
-
-### Dense and hybrid retrieval
-
-Dense retrieval embeds one document per CodeUnit using:
-
-```text
-symbol: <qualified_name>
-signature: <signature or empty>
-code:
-<source_text>
-```
-
-`EmbeddingProvider` returns raw float32 vectors. The vector-index layer L2-normalizes documents and queries once, then searches with FAISS `IndexFlatIP` (exact cosine via inner product; higher is better). Semantic vector identity is `Symbol.qualified_name` stored in artifact metadata ordinal order — not SQLite `code_units.id`.
-
-Dense artifacts live outside SQLite under `PATH/.codeintel/dense/`:
-
-- `index.faiss`
-- `metadata.json` (`artifact_version = 1`, provider/model/dimension, metric, fingerprint, `qualified_names`, …)
-
-A whole-corpus SHA-256 fingerprint protects against silently searching a stale dense artifact after the SQLite snapshot changes. Rebuild with `aicode embed PATH`.
-
-Hybrid retrieval fuses lexical and dense ranked lists with Reciprocal Rank Fusion:
-
-- `RRF_K = 60`
-- ranks start at 1
-- equal lexical and dense weights
-- per-retriever candidate depth `max(50, 5 * limit)`
-- deduplicate by `symbol_qualified_name`
-- graph relations are **not** used inside Hybrid (ablation integrity)
-
-### Graph-augmented retrieval
-
-`--mode graph` means **graph-augmented Hybrid**, not a replacement of Hybrid:
-
-1. Retrieve Hybrid base pool `max(10, limit)`
-2. Take top `GRAPH_SEED_COUNT = 10` Hybrid seeds
-3. Reconstruct `CodeGraph` from persisted SQLite Symbols/Relations (no live reparse)
-4. Expand **direct** (depth-1) neighbors in **both** directions for `CALLS`, `REFERENCES`, `INHERITS`, `CONTAINS`
-5. Keep only `RESOLVED` edges; exclude `IMPORTS`, `PROBABLE`, and `UNRESOLVED`
-6. Return only Symbols with persisted CodeUnits; never return MODULE nodes
-7. Aggregate unique supporting seed ranks: `GraphSupport = Σ 1/(60 + seed_rank)`
-8. Rank structural candidates by GraphSupport, then fuse Hybrid ranking + structural ranking with equal-weight RRF (`k=60`)
-
-Conservative policy rationale: keep ablation clean, bound expansion (no depth-2 / module fan-out), and avoid uncertain PROBABLE edges and noisy IMPORTS in the first structural baseline.
-
-### Structured reranking and explainability
-
-`--mode reranked` sits **after** Graph-Augmented retrieval and does **not** expand new candidates:
-
-1. Retrieve Graph candidates with depth `max(20, 5 * limit)` (canonical original ranks)
-2. Reconstruct Hybrid top-10 seeds (same filters) for structured provenance
-3. Extract RESOLVED `CALLS` / `REFERENCES` / `INHERITS` / `CONTAINS` evidence between seeds and Graph candidates only
-4. Build up to four relation-specific rankings via `RelationSupport = Σ 1/(60 + seed_rank)` (unique seeds per kind)
-5. Fuse original Graph ranking + nonempty evidence lists with equal-weight RRF (`k=60`)
-6. Return `RerankedResult` wrapping `SearchResult` plus `RerankExplanation` (rank delta, exact RRF contributions, relation evidence)
-
-No relation-type numeric weights, locality/kind/degree boosts, IMPORTS/PROBABLE evidence, cross-encoder, or LLM prose. `--explain` formats the structured explanation compactly on the CLI.
-
-### Token-budget context compiler
-
-`compile_context(...)` is a **pure** packing transform over a finite `Sequence[RerankedResult]`:
-
-1. Process candidates in input order (1-based source ranks)
-2. Defensive qname dedup (first occurrence wins)
-3. Byte-span overlap suppression against **selected** blocks only (same path + overlapping `[start_byte, end_byte)`)
-4. Render whole CodeUnits with plain language-neutral delimiters (no Markdown fences; no separate signature/score/explanation lines)
-5. Greedy skip-to-fit: if a whole block does not fit, omit (`OVERSIZED` / `BUDGET`) and continue
-6. Authoritative invariant: `token_counter.count(compiled.text) <= token_budget` and `used_tokens == count(text)`
-
-Default counter: `SimpleTokenCounter` / `simple-lexical-v1` — deterministic **estimated** lexical units (ASCII identifiers, numbers, other non-whitespace characters). It is **not** OpenAI/Anthropic/Gemini/MiniLM tokenization. Exact model-window compliance requires injecting a compatible `TokenCounter` later (Milestone 10 territory).
-
-CLI `aicode context` orchestrates `search_reranked(..., limit=20)` then `compile_context` with `SimpleTokenCounter`. The compiler itself never retrieves. The token budget applies to `CompiledContext.text` only; the CLI's compact human-readable summary is printed separately and is not part of the budgeted text.
-
-The real embedding stack is an **optional** extra:
+## Quick start (recruiter demo)
 
 ```bash
 uv sync --extra embeddings
+uv run aicode index benchmarks/python_retrieval_v1/corpus --language python --full
+uv run aicode embed benchmarks/python_retrieval_v1/corpus
+uv run aicode search benchmarks/python_retrieval_v1/corpus \
+  "where does checkout persist the order after a successful charge" \
+  --mode reranked --explain
+uv run aicode context benchmarks/python_retrieval_v1/corpus \
+  "where does checkout persist the order after a successful charge" \
+  --budget 400
+uv run aicode benchmark benchmarks/python_retrieval_v1/corpus \
+  benchmarks/python_retrieval_v1/benchmark.json
 ```
 
-Default `uv sync` (and CI) installs NumPy + FAISS only. Tests use a deterministic fake provider and do not download models.
+Default `uv sync` (and CI) skips Sentence Transformers. Tests use a fake provider.
 
-Baseline limitations:
+## Retrieval modes
 
-- indexing still discovers and hashes all supported source bytes on every `aicode index`
-- global symbol-resolution changes require relation extraction for all current files (unchanged files may be reparsed for relations)
-- no AST / whole-file source cache; no dependency-invalidation graph
-- schema v1 indexes require explicit `aicode index --full` (no silent migration)
-- path rename/move is delete+add (no logical rename detection)
-- syntax-error source replaces prior indexed truth for that file
-- SQLite and dense artifacts update in separate commands (stale dense until re-embed)
-- FAISS Flat files are rebuilt even when vectors are reused; reuse saves embedding calls
-- no file watcher / daemon
-- indexing is no longer full-rewrite-only, but dense ANN / vector-DB upserts are not implemented
-- dense artifacts are selectively refreshed (not a separate embedding cache product)
-- `unicode61` is not a code-specific tokenizer
-- camelCase is not specially segmented
-- default MiniLM model is a **general** semantic baseline, not code-specialized
-- MiniLM may truncate long inputs according to its own max sequence length; one CodeUnit remains one vector (no chunking)
-- FAISS baseline is exact `IndexFlatIP`, not ANN-tuned HNSW/IVF
-- scores are not comparable across retrieval modes
-- graph mode requires a dense artifact because Hybrid is the base
-- graph expansion is direct one-hop only (no depth-2)
-- only RESOLVED edges; IMPORTS and PROBABLE excluded from graph retrieval
-- no relation-type-specific weights
-- reranked mode requires Graph → Hybrid → Dense artifacts
-- reranked candidate depth increases query work (Graph + Hybrid seed reconstruction)
-- equal evidence-channel weights are a fixed heuristic baseline, not calibrated ranking
-- no IMPORTS / PROBABLE / same-file / same-module / SymbolKind / degree boosts in reranking
-- no new graph expansion in M6 (Graph candidate set is closed)
-- no structured reranking beyond the Graph+evidence RRF baseline
-- no cross-encoder / learned reranker
-- no LLM explanation generation
-- default context token count is a deterministic estimate (`simple-lexical-v1`), not an exact vendor tokenizer
-- CodeUnits are never truncated or chunked; oversized high-ranked units may be skipped
-- greedy skip-to-fit packing is not global optimization
-- first-selected overlap policy follows rerank order (omitted parents do not reserve spans)
-- CLI context examines only the top 20 reranked candidates
-- rerank score / M6 explanations are not rendered into compiled code context
-- no LLM call / answer generation
-- no incremental indexing watcher/daemon
-- no benchmark improvement claims yet
+| Mode | One-line behavior |
+| --- | --- |
+| lexical | BM25 over FTS5 CodeUnit documents |
+| dense | Exact FAISS FlatIP cosine over MiniLM (or injected provider) documents |
+| hybrid | Equal-weight RRF of lexical + dense (`k=60`) |
+| graph | Hybrid seeds + depth-1 RESOLVED CALLS/REFERENCES/INHERITS/CONTAINS, then RRF |
+| reranked | Graph candidates reranked with relation-evidence RRF + explanations |
 
-## Technology Stack
+`SearchResult.score` values are **not** comparable across modes. Evaluate ranks.
 
-### Current
+## Benchmark methodology
 
-| Tool | Role |
-|------|------|
-| Python 3.14 | Runtime |
-| uv | Dependency and environment management |
-| Typer | CLI framework |
-| Tree-sitter | Syntax parsing runtime |
-| tree-sitter-python | Python grammar |
-| tree-sitter-cpp | C++ grammar (`==0.23.4`) |
-| SQLite / FTS5 | Persistent index and lexical BM25 retrieval (stdlib `sqlite3`) |
-| NumPy | Dense vector arrays |
-| FAISS (`faiss-cpu`) | Exact `IndexFlatIP` dense index |
-| Sentence Transformers (optional extra `embeddings`) | Local embedding provider |
-| pytest | Unit and integration testing |
-| Ruff | Linting and formatting |
-| mypy | Strict static type checking |
-| Hatchling | Package build backend |
-| Git | Version control |
-| GitHub Actions | Continuous integration |
+- **ID / version:** `python-structural-retrieval-v1` / `1`
+- **SHA-256:** `5125c8facaa3344417ca5ea31958f2f6d1a1393a3675963c8e2cbf8d611ec2de`
+- **Corpus:** 11-file synthetic order/payment/inventory Python app (~53 CodeUnits)
+- **Queries:** 24 frozen labels — 6 lexical / 6 behavioral / 6 calls / 6 inheritance
+- **Gold:** ordinary CodeUnit qnames (validated against the index)
+- **Metrics:** Hit@1 / Hit@5 / Hit@10 / MRR@10 at **top_k=10**
+- **Model:** `sentence-transformers/all-MiniLM-L6-v2`
+- Queries/golds frozen **before** the first real MiniLM run; **no ranking tuning**
+- Wins **and** losses reported
+- **Corpus relation note:** this v1 corpus emits CALLS / INHERITS / CONTAINS /
+  IMPORTS under the Python extractor; it has **zero REFERENCES** edges, so the
+  quantitative benchmark does **not** exercise the REFERENCES evidence channel
+  (engine support for REFERENCES remains covered by non-benchmark tests)
 
-### Planned
+### Aggregate interpretation
 
-| Technology | Planned role |
-|------------|--------------|
-| Benchmark suite / optional LLM | Milestone 10 |
+- Dense is the aggregate leader on this set (highest Hit@1 / Hit@10 / MRR@10)
+- Hybrid beats Graph aggregate (pairwise Graph vs Hybrid: 3 / 7 / 14)
+- Graph beats Reranked aggregate (pairwise Reranked vs Graph: 2 / 7 / 15)
 
-Sentence Transformers is optional and is **not** installed by default `uv sync`.
+Canonical artifacts:
 
-## Repository Structure
+- [`benchmarks/results/python_retrieval_v1_minilm.json`](benchmarks/results/python_retrieval_v1_minilm.json)
+- [`benchmarks/results/python_retrieval_v1_minilm.md`](benchmarks/results/python_retrieval_v1_minilm.md)
 
-```text
-graph_code_intelligence/
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── src/
-│   └── codeintel/
-│       ├── __init__.py
-│       ├── cli.py
-│       ├── dense.py
-│       ├── discovery.py
-│       ├── embeddings.py
-│       ├── graph.py
-│       ├── graph_retrieval.py
-│       ├── hybrid.py
-│       ├── indexing.py
-│       ├── lexical.py
-│       ├── models.py
-│       ├── repository.py
-│       ├── reranking.py
-│       ├── context.py
-│       ├── vector_index.py
-│       ├── languages/
-│       │   ├── __init__.py
-│       │   ├── base.py
-│       │   ├── selection.py
-│       │   ├── python/
-│       │   │   ├── __init__.py
-│       │   │   ├── adapter.py
-│       │   │   ├── parser.py
-│       │   │   └── relations.py
-│       │   └── cpp/
-│       │       ├── __init__.py
-│       │       ├── adapter.py
-│       │       ├── naming.py
-│       │       ├── parser.py
-│       │       └── relations.py
-│       └── storage/
-│           ├── __init__.py
-│           ├── database.py
-│           └── schema.py
-├── tests/
-│   ├── fixtures/
-│   │   ├── cpp_graph/
-│   │   ├── cpp_repo/
-│   │   ├── python_dense/
-│   │   ├── python_graph/
-│   │   ├── python_graph_search/
-│   │   ├── python_rerank/
-│   │   ├── python_context/
-│   │   ├── python_repo/
-│   │   └── python_search/
-│   ├── helpers/
-│   │   └── fake_embeddings.py
-│   ├── integration/
-│   │   ├── test_embed_search_cli.py
-│   │   ├── test_graph_cli.py
-│   │   ├── test_graph_search_cli.py
-│   │   ├── test_index_search_cli.py
-│   │   ├── test_inspect_cli.py
-│   │   ├── test_reranked_search_cli.py
-│   │   └── test_context_cli.py
-│   └── unit/
-│       ├── test_cli.py
-│       ├── test_dense.py
-│       ├── test_discovery.py
-│       ├── test_embeddings_contract.py
-│       ├── test_graph.py
-│       ├── test_graph_retrieval.py
-│       ├── test_hybrid.py
-│       ├── test_reranking.py
-│       ├── test_context.py
-│       ├── test_language_adapter.py
-│       ├── test_lexical.py
-│       ├── test_models.py
-│       ├── test_python_adapter.py
-│       ├── test_python_parser.py
-│       ├── test_python_relations.py
-│       ├── test_repository.py
-│       ├── test_storage.py
-│       └── test_vector_index.py
-├── .gitignore
-├── .python-version
-├── LICENSE
-├── README.md
-├── pyproject.toml
-└── uv.lock
+### Pairwise (first-relevant rank)
+
+| Comparison | Wins | Ties | Losses |
+| --- | ---: | ---: | ---: |
+| Graph vs Hybrid | 3 | 7 | 14 |
+| Reranked vs Graph | 2 | 7 | 15 |
+
+Missing ranks are worse than any rank 1..10; both missing = tie.
+
+### Showcase cases (preselected before first real run)
+
+**`lex-01` (lexical)** — query: `normalize_email helper`
+Gold: `users.normalize_email`
+Hybrid=1, Graph=1, Reranked=1
+
+**`calls-02` (calls / structural)** — query: `where does checkout persist the order after a successful charge`
+Gold: `store.save_order`
+Hybrid=2, Graph=3, Reranked=5
+
+On this preselected structural example, graph/reranked did **not** improve Hybrid.
+
+## Incremental indexing (exact work counts)
+
+No wall-clock speed claims. On a temporary copy of the benchmark corpus:
+
+| Scenario | Inc. files_analyzed | Full files_analyzed | Selective vectors_reused | Selective vectors_embedded |
+| --- | ---: | ---: | ---: | ---: |
+| no-op | 0 | 11 | 53 | 0 |
+| body-edit | 1 | 11 | 52 | 1 |
+| symbol-rename | 2 | 11 | 51 | 2 |
+| add-delete | 1 | 11 | 50 | 1 |
+
+Dense work counts use a deterministic fake provider (reuse/embed work only).
+Details: [`benchmarks/results/incremental_work_v1.md`](benchmarks/results/incremental_work_v1.md).
+
+Notes:
+
+- Incremental still hashes all discovered files to classify changes
+- Global resolution-surface changes trigger broader relation refresh
+- FAISS Flat is rebuilt even when embeddings are reused
+
+## C++ support (M9)
+
+- `--language cpp` on `inspect` / `graph` / `index` (not on embed/search/context)
+- Overload-safe callable qnames; definitions-only callables; headers indexed
+- Conservative Tree-sitter relations; **no C++ REFERENCES**
+- Shared M3–M8 persistence/retrieval stack; single-language snapshots only
+
+```bash
+uv run aicode inspect tests/fixtures/cpp_repo --language cpp
+uv run aicode graph tests/fixtures/cpp_graph --language cpp
 ```
 
-uv creates a local `.venv/` directory during setup. That directory is gitignored and is not part of the tracked source tree.
+## Context compiler
 
-## Development Setup
+- Packs whole CodeUnits under an estimated token budget (`simple-lexical-v1`)
+- Greedy skip-to-fit, qname dedup, byte-span overlap suppression
+- Not a vendor LLM tokenizer
 
-### Prerequisites
+## CLI surface
 
-- Git
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) 0.12.7
+```bash
+uv run aicode version
+uv run aicode inspect PATH [--language python|cpp]
+uv run aicode graph PATH [--language python|cpp] [--symbol QNAME]
+uv run aicode index PATH [--language python|cpp] [--full] [--db PATH]
+uv run aicode embed PATH [--db PATH] [--dense-dir PATH] [--model ID] [--full]
+uv run aicode search PATH QUERY [--mode lexical|dense|hybrid|graph|reranked] [--explain]
+uv run aicode context PATH QUERY --budget N
+uv run aicode benchmark PATH BENCHMARK_FILE [--json-out PATH] [--markdown-out PATH]
+```
 
-Python 3.14.7 is pinned in `.python-version`. uv installs and uses that version automatically.
-
-From the repository directory:
+## Development
 
 ```bash
 uv sync
-```
-
-This command:
-
-- resolves locked dependencies from `uv.lock`
-- creates or updates the local `.venv/`
-- installs the package and development dependencies (NumPy + FAISS included; Sentence Transformers is **not**)
-
-To enable the real local embedding provider:
-
-```bash
-uv sync --extra embeddings
-```
-
-Do not manually `pip install` packages into the environment.
-
-## CLI
-
-```bash
-uv run aicode --help
-uv run aicode version
-uv run aicode inspect PATH
-uv run aicode graph PATH
-uv run aicode graph PATH --symbol QUALIFIED_NAME
-uv run aicode index PATH
-uv run aicode embed PATH
-uv run aicode search PATH QUERY
-uv run aicode search PATH QUERY --mode dense
-uv run aicode search PATH QUERY --mode hybrid
-uv run aicode search PATH QUERY --mode graph
-uv run aicode search PATH QUERY --mode reranked
-uv run aicode search PATH QUERY --mode reranked --explain
-uv run aicode context PATH QUERY --budget N
-```
-
-Expected version output:
-
-```text
-aicode 0.1.0
-```
-
-Example inspection of the parser fixture repository:
-
-```bash
-uv run aicode inspect tests/fixtures/python_repo
-```
-
-Example graph inspection:
-
-```bash
-uv run aicode graph tests/fixtures/python_graph
-uv run aicode graph tests/fixtures/python_graph --symbol service.Service
-```
-
-Example lexical index and search against a temporary database:
-
-```bash
-uv run aicode index tests/fixtures/python_search --db /tmp/codeintel-search.db
-uv run aicode search tests/fixtures/python_search "payment authorization" --db /tmp/codeintel-search.db
-```
-
-Example dense artifact build (requires `uv sync --extra embeddings`; may download the default MiniLM model once):
-
-```bash
-uv run aicode index tests/fixtures/python_dense --db /tmp/codeintel-dense.db
-uv run aicode embed tests/fixtures/python_dense --db /tmp/codeintel-dense.db --dense-dir /tmp/codeintel-dense-art
-uv run aicode search tests/fixtures/python_dense "check whether a login session is still valid" \
-  --db /tmp/codeintel-dense.db --dense-dir /tmp/codeintel-dense-art --mode hybrid
-```
-
-Generated indexes default to `PATH/.codeintel/index.db` and dense artifacts to `PATH/.codeintel/dense/`. The `.codeintel/` directory is gitignored.
-
-## Testing and Code Quality
-
-Run each check independently:
-
-```bash
+uv sync --extra embeddings   # optional real MiniLM provider
 uv run pytest
-```
-
-Runs the unit and integration test suites, including Python parsing fixtures, relationship extraction, CodeGraph APIs, SQLite persistence, lexical BM25 search, dense/hybrid/graph/reranked retrieval, token-budget context compilation with a fake embedding provider, and CLI inspect/graph/index/embed/search/context behavior. Default pytest does **not** download embedding models.
-
-```bash
 uv run ruff check .
-```
-
-Runs Ruff lint rules configured in `pyproject.toml`.
-
-```bash
 uv run ruff format --check .
-```
-
-Verifies code formatting without modifying files. Use `uv run ruff format .` to apply formatting locally.
-
-```bash
 uv run mypy
 ```
 
-Runs strict static type checking over `src/` and `tests/`.
+CI runs the full suite (**286** tests) with the fake embedding
+provider and **does not** download MiniLM or treat metric outcomes as pass/fail.
 
-## Continuous Integration
+## Reproducibility
 
-The workflow at `.github/workflows/ci.yml` validates on every push and pull request:
+| Field | Value |
+| --- | --- |
+| Python | 3.14.7 |
+| Engine | 0.1.0 |
+| Schema | SQLite `user_version = 2` |
+| Dense artifact_version | 1 |
+| Benchmark ID | python-structural-retrieval-v1 |
+| Benchmark SHA-256 | `5125c8facaa3344417ca5ea31958f2f6d1a1393a3675963c8e2cbf8d611ec2de` |
+| Model | sentence-transformers/all-MiniLM-L6-v2 |
+| Top-K | 10 |
+| Corpus fingerprint (canonical run) | `1ac8a3a8dfc3d0bcf6840bfa229a7e44db9512ecdade9a54eeaa7a5ff548d8ef` |
 
-- dependency synchronization from the lock file
-- pytest
-- Ruff lint
-- Ruff format check
-- mypy
+```bash
+uv sync --extra embeddings
+uv run aicode index benchmarks/python_retrieval_v1/corpus --language python --full
+uv run aicode embed benchmarks/python_retrieval_v1/corpus
+uv run aicode benchmark benchmarks/python_retrieval_v1/corpus \
+  benchmarks/python_retrieval_v1/benchmark.json \
+  --json-out benchmarks/results/python_retrieval_v1_minilm.json \
+  --markdown-out benchmarks/results/python_retrieval_v1_minilm.md
+PYTHONPATH=tests uv run python benchmarks/incremental_work_v1.py
+```
 
-The workflow is configured in this repository and runs on GitHub for pushes and pull requests against the published project remote.
+## Limitations
 
-## Roadmap
+- Benchmark is small (24 queries, ~53 CodeUnits), synthetic, and hand-labeled
+  (author familiarity bias possible); not a large-scale or statistically
+  significant evaluation
+- MiniLM is general text, not code-specialized; no Hugging Face revision pin in
+  result metadata
+- On this benchmark: Dense strongest aggregate; Graph underperformed Hybrid;
+  Reranked underperformed Graph
+- v1 corpus has no REFERENCES edges (CALLS/INHERITS/CONTAINS/IMPORTS only)
+- Quantitative metrics are Python-only; C++ is capability/smoke evidence from M9
+- No LLM answer generation (CompiledContext is a future consumer boundary)
+- No wall-clock / percentage-faster claims; incremental evidence is work counts
+- No mixed-language index; C++ is syntax-only (no clang / type inference / C++ REFERENCES)
+- No ANN / external vector DB
+- Incremental indexing still hashes all files; global symbol-surface changes can refresh many relations
+- SQLite refresh and dense refresh are separate steps; Flat index rebuild accompanies embed refresh
 
-| Milestone | Scope | Status |
-|-----------|-------|--------|
-| 0 | Repository Foundation | Complete |
-| 1 | Python Parsing & Semantic Units | Complete |
-| 2 | Static Relationships & Code Graph | Complete |
-| 3 | Persistent Index & Lexical Retrieval | Complete |
-| 4 | Dense & Hybrid Retrieval | Complete |
-| 5 | Graph-Augmented Retrieval | Complete |
-| 6 | Structured Reranking & Explainability | Complete |
-| 7 | Token-Budget Context Compiler | Complete |
-| 8 | Incremental Indexing | Complete |
-| 9 | C++ Language Adapter | **Current** |
-| 10 | Benchmark Suite, Optional LLM Integration & Portfolio Polish | Planned |
+## Technology stack
 
-## C++ limitations (Milestone 9)
-
-M9 is a **syntax-only Tree-sitter C++ baseline**, not a compiler:
-
-- no mixed Python+C++ index (single language per index)
-- no C language adapter (`.c` excluded)
-- no first-class template / enum / union / lambda Symbols
-- no template instantiation
-- no clang / libclang / `compile_commands.json`
-- no macro expansion or conditional-compilation evaluation
-- no type inference or overload ranking (ambiguous calls stay unresolved)
-- angle-bracket includes always unresolved; no build-system include paths
-- no C++ `REFERENCES` edges in the first baseline
-- `using` / typedef aliases not resolved
-- cross-file out-of-class method definitions may remain `FUNCTION` when the class is not proven in the same file
-- no compiler-grade call graph / virtual dispatch claims
-- no benchmark or LLM claims yet (Milestone 10)
-
-## Design Principles
-
-- **Code structure over arbitrary chunking** — retrieval should respect program structure, not only text boundaries.
-- **LLM as consumer, not core engine** — the engine produces structured context; an LLM is optional downstream.
-- **Measurable improvements over AI buzzwords** — claims should be backed by benchmarks, not marketing language.
-- **Interpretable retrieval and ranking** — ranking decisions should be inspectable and explainable where possible.
-- **Incremental development** — each milestone adds a testable subsystem before the next layer is built.
-- **Independently testable subsystems** — parsing, indexing, retrieval, and ranking can be validated in isolation.
-- **No unnecessary distributed infrastructure** — a single-machine architecture is sufficient for the research scope.
-- **Honest static-analysis limitations** — dynamic behavior, macros, and runtime indirection are acknowledged constraints.
-
-## Evaluation Plan
-
-Future evaluation will measure retrieval quality using standard information-retrieval metrics:
-
-- **Recall@k** — fraction of relevant items retrieved in the top *k* results
-- **MRR** (Mean Reciprocal Rank) — average reciprocal rank of the first relevant result
-- **nDCG** (normalized Discounted Cumulative Gain) — ranking quality with position-weighted relevance
-
-The benchmark will compare, at minimum:
-
-- BM25 (lexical baseline)
-- Dense retrieval
-- Hybrid retrieval
-- Hybrid + Graph
-- Full Engine (hybrid + graph + reranking + context compilation)
-
-**No benchmark results exist yet.** Numbers will be reported only after the benchmark suite is implemented and run.
+Python 3.14, uv, Typer, Tree-sitter (+ python/cpp), SQLite/FTS5, NumPy, FAISS (`faiss-cpu`), optional Sentence Transformers, pytest, Ruff, mypy, Hatchling, GitHub Actions.
 
 ## License
 
-This project is released under the MIT License. See [MIT License](LICENSE) for the full text.
+MIT License. Copyright (c) 2026 Simon Wen. See [`LICENSE`](LICENSE).

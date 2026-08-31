@@ -59,7 +59,9 @@ class SentenceTransformerEmbeddingProvider:
         os.environ.setdefault("OMP_NUM_THREADS", "1")
 
         try:
-            from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
+            from sentence_transformers import (  # type: ignore[import-not-found,unused-ignore]
+                SentenceTransformer,
+            )
         except ImportError as exc:
             raise EmbeddingDependencyError(
                 "Optional embedding dependency is not installed. "
@@ -74,7 +76,12 @@ class SentenceTransformerEmbeddingProvider:
         if callable(get_dim):
             self._dimension = int(get_dim())
         else:
-            self._dimension = int(self._model.get_sentence_embedding_dimension())
+            dimension = self._model.get_sentence_embedding_dimension()
+            if dimension is None:
+                raise EmbeddingDependencyError(
+                    f"Embedding model {model_id!r} did not report a dimension"
+                )
+            self._dimension = int(dimension)
 
     @property
     def provider_id(self) -> str:

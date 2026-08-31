@@ -1,0 +1,199 @@
+{
+  "benchmark_version": 1,
+  "benchmark_id": "python-structural-retrieval-v1",
+  "language": "python",
+  "queries": [
+    {
+      "id": "lex-01",
+      "category": "lexical",
+      "query": "normalize_email helper",
+      "relevant_qnames": ["users.normalize_email"],
+      "showcase": true,
+      "notes": "Preselected lexical showcase before first real run."
+    },
+    {
+      "id": "lex-02",
+      "category": "lexical",
+      "query": "InventoryItem has_stock method",
+      "relevant_qnames": ["inventory.InventoryItem.has_stock"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "lex-03",
+      "category": "lexical",
+      "query": "apply_tax_cents tax_bps",
+      "relevant_qnames": ["pricing.apply_tax_cents"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "lex-04",
+      "category": "lexical",
+      "query": "refund_payment capture_id",
+      "relevant_qnames": ["payments.refund_payment"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "lex-05",
+      "category": "lexical",
+      "query": "list_order_ids function",
+      "relevant_qnames": ["store.list_order_ids"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "lex-06",
+      "category": "lexical",
+      "query": "OrderLine class definition",
+      "relevant_qnames": ["orders.OrderLine"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "beh-01",
+      "category": "behavioral",
+      "query": "convert a raw email string into a lowercase lookup key",
+      "relevant_qnames": ["users.normalize_email"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "beh-02",
+      "category": "behavioral",
+      "query": "increase on-hand warehouse quantity when shipments arrive",
+      "relevant_qnames": ["inventory.restock_units"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "beh-03",
+      "category": "behavioral",
+      "query": "compute a product line amount from unit price and count",
+      "relevant_qnames": ["pricing.line_total_cents"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "beh-04",
+      "category": "behavioral",
+      "query": "compose a welcome message for a newly registered shopper",
+      "relevant_qnames": ["notifications.notify_customer_welcome"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "beh-05",
+      "category": "behavioral",
+      "query": "remove a previously saved purchase from the in-memory store",
+      "relevant_qnames": ["store.delete_order"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "beh-06",
+      "category": "behavioral",
+      "query": "create a purchase container with no line items yet",
+      "relevant_qnames": ["orders.empty_order"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "calls-01",
+      "category": "calls",
+      "query": "which helper reserves stock while preparing an order for checkout",
+      "relevant_qnames": ["validation.reserve_order_inventory"],
+      "showcase": false,
+      "notes": "Reachable via CALLS from checkout.finalize_checkout."
+    },
+    {
+      "id": "calls-02",
+      "category": "calls",
+      "query": "where does checkout persist the order after a successful charge",
+      "relevant_qnames": ["store.save_order"],
+      "showcase": true,
+      "notes": "Preselected structural showcase before first real run; CALLS from finalize_checkout."
+    },
+    {
+      "id": "calls-03",
+      "category": "calls",
+      "query": "send the confirmation message assembled during checkout completion",
+      "relevant_qnames": ["notifications.notify_order_confirmed"],
+      "showcase": false,
+      "notes": "Called from checkout.finalize_checkout."
+    },
+    {
+      "id": "calls-04",
+      "category": "calls",
+      "query": "check whether a shopper account is allowed to place purchases",
+      "relevant_qnames": ["users.is_active_customer"],
+      "showcase": false,
+      "notes": "Called from validation.validate_order_customer."
+    },
+    {
+      "id": "calls-05",
+      "category": "calls",
+      "query": "card authorization invoked when a charge policy approves payment",
+      "relevant_qnames": ["payments.authorize_card"],
+      "showcase": false,
+      "notes": "Called from policies.ChargePolicy.approve."
+    },
+    {
+      "id": "calls-06",
+      "category": "calls",
+      "query": "build the email subject line used when confirming a purchase",
+      "relevant_qnames": ["notifications.build_confirmation_subject"],
+      "showcase": false,
+      "notes": "Called from notifications.notify_order_confirmed."
+    },
+    {
+      "id": "inh-01",
+      "category": "inheritance",
+      "query": "base class for checkout charge approval policies",
+      "relevant_qnames": ["policies.ChargePolicy"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "inh-02",
+      "category": "inheritance",
+      "query": "charge policy that rejects amounts outside a configured range",
+      "relevant_qnames": ["policies.StrictChargePolicy"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "inh-03",
+      "category": "inheritance",
+      "query": "prepaid-token charge policy that extends the strict amount bounds",
+      "relevant_qnames": ["policies.PrepaidChargePolicy"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "inh-04",
+      "category": "inheritance",
+      "query": "root discount policy that returns zero discount by default",
+      "relevant_qnames": ["discounts.DiscountPolicy"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "inh-05",
+      "category": "inheritance",
+      "query": "percentage-based discount policy subclass",
+      "relevant_qnames": ["discounts.PercentageDiscount"],
+      "showcase": false,
+      "notes": ""
+    },
+    {
+      "id": "inh-06",
+      "category": "inheritance",
+      "query": "loyalty discount that adds a bonus percentage on top of a percentage discount",
+      "relevant_qnames": ["discounts.LoyaltyDiscount"],
+      "showcase": false,
+      "notes": ""
+    }
+  ]
+}

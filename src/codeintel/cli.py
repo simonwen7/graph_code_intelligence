@@ -23,6 +23,15 @@ from codeintel.embeddings import (
     EmbeddingDependencyError,
     create_embedding_provider,
 )
+from codeintel.evaluation import (
+    BENCHMARK_TOP_K,
+    EVALUATION_MODES,
+    BenchmarkError,
+    load_benchmark_definition,
+    run_benchmark,
+    write_benchmark_json,
+    write_benchmark_markdown,
+)
 from codeintel.graph import CodeGraph
 from codeintel.hybrid import search_hybrid
 from codeintel.languages.selection import SourceLanguage, create_language_tools
@@ -713,6 +722,125 @@ def context_command(
         f"selected={compiled.selected_count}/{compiled.candidate_count}; "
         f"omitted={compiled.omitted_count}"
     )
+
+
+@app.command("benchmark")
+def benchmark_command(
+    path: Path,
+    benchmark_file: Path,
+    db: Annotated[
+        Path | None,
+        typer.Option("--db", help="SQLite index path (default: PATH/.codeintel/index.db)."),
+    ] = None,
+    dense_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--dense-dir",
+            help="Dense artifact directory (default: PATH/.codeintel/dense/).",
+        ),
+    ] = None,
+    model: Annotated[
+        str,
+        typer.Option("--model", help="Embedding model id for the Sentence Transformers provider."),
+    ] = DEFAULT_MODEL_ID,
+    json_out: Annotated[
+        Path | None,
+        typer.Option("--json-out", help="Optional path for deterministic JSON results."),
+    ] = None,
+    markdown_out: Annotated[
+        Path | None,
+        typer.Option("--markdown-out", help="Optional path for Markdown report."),
+    ] = None,
+) -> None:
+    """Evaluate a frozen labeled retrieval benchmark against existing artifacts.
+
+    Does not index or embed. Exit code is nonzero only for invalid setup; metric
+    outcomes never fail the process.
+    """
+    if not path.exists():
+        typer.echo(f"Error: path does not exist: {path}", err=True)
+        raise typer.Exit(code=1)
+    if not path.is_dir():
+        typer.echo("Error: benchmark expects a repository directory, not a file.", err=True)
+        raise typer.Exit(code=1)
+    if not benchmark_file.exists() or not benchmark_file.is_file():
+        typer.echo(f"Error: benchmark file does not exist: {benchmark_file}", err=True)
+        raise typer.Exit(code=1)
+
+    database_path = db if db is not None else default_index_path(path)
+    artifact_dir = dense_dir if dense_dir is not None else default_dense_dir(path)
+    if not database_path.exists():
+        typer.echo(
+            f"Error: index database does not exist: {database_path}\n"
+            f"Run `aicode index {path}` first.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        definition = load_benchmark_definition(benchmark_file)
+        provider = create_embedding_provider(model)
+        with IndexDatabase(database_path, create=False) as database:
+            result = run_benchmark(
+                definition,
+                database=database,
+                dense_dir=artifact_dir,
+                provider=provider,
+                top_k=BENCHMARK_TOP_K,
+            )
+    except BenchmarkError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except EmbeddingDependencyError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except SchemaVersionError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except (IndexDatabaseError, DenseIndexError, OSError, ValueError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_out is not None:
+        write_benchmark_json(result, json_out)
+    if markdown_out is not None:
+        write_benchmark_markdown(result, markdown_out)
+
+    typer.echo(f"benchmark_id: {result.benchmark_id}")
+    typer.echo(f"benchmark_version: {result.benchmark_version}")
+    typer.echo(f"query_count: {result.query_count}")
+    typer.echo(f"top_k: {result.top_k}")
+    typer.echo(f"benchmark_sha256: {result.benchmark_sha256}")
+    typer.echo(f"provider: {result.provider_id}")
+    typer.echo(f"model: {result.model_id}")
+    typer.echo(f"corpus_fingerprint: {result.corpus_fingerprint}")
+    typer.echo("")
+    typer.echo("aggregate:")
+    typer.echo("mode       Hit@1   Hit@5  Hit@10  MRR@10")
+    for mode in EVALUATION_MODES:
+        metrics = result.aggregate[mode]
+        typer.echo(
+            f"{mode:<10} {metrics.hit_at_1:6.4f} {metrics.hit_at_5:6.4f} "
+            f"{metrics.hit_at_10:6.4f} {metrics.mrr_at_10:6.4f}"
+        )
+    typer.echo("")
+    typer.echo("by_category MRR@10:")
+    for category in ("lexical", "behavioral", "calls", "inheritance"):
+        parts = [
+            f"{mode}={result.by_category[category][mode].mrr_at_10:.4f}"
+            for mode in EVALUATION_MODES
+        ]
+        typer.echo(f"  {category}: " + ", ".join(parts))
+    typer.echo("")
+    for pair in result.pairwise:
+        typer.echo(
+            f"{pair.left_mode}_vs_{pair.right_mode}: "
+            f"wins={pair.wins} ties={pair.ties} losses={pair.losses}"
+        )
+    if json_out is not None:
+        typer.echo(f"json_out: {json_out}")
+    if markdown_out is not None:
+        typer.echo(f"markdown_out: {markdown_out}")
 
 
 def _source_preview(source_text: str, *, max_chars: int = 120) -> str:
