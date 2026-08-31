@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Graph-Augmented Code Intelligence Engine</title>
+  <meta name="description" content="A local code-retrieval engine combining lexical search, dense embeddings, and program structure.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" id="top">
+    <nav class="nav" aria-label="Primary">
+      <a class="nav-brand" href="#top">AICODE</a>
+      <ul class="nav-links">
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#retrieval">Retrieval</a></li>
+        <li><a href="#benchmark">Benchmark</a></li>
+        <li><a href="#incremental">Incremental</a></li>
+        <li><a href="#languages">C++</a></li>
+        <li>
+          <a href="https://github.com/simonwen7/graph_code_intelligence" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero section" aria-labelledby="hero-title">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <h1 id="hero-title" class="hero-title">
+            Graph-Augmented<br>
+            Code Intelligence Engine
+          </h1>
+          <p class="hero-lead">
+            A local code-retrieval engine that parses Python and C++ into semantic
+            CodeUnits, combines lexical and dense retrieval with program structure,
+            and compiles explainable results into token-budgeted context.
+          </p>
+          <ul class="pill-row" aria-label="Technologies">
+            <li class="pill">Python</li>
+            <li class="pill">C++</li>
+            <li class="pill">Tree-sitter</li>
+            <li class="pill">SQLite / FTS5</li>
+            <li class="pill">FAISS</li>
+            <li class="pill">RRF</li>
+            <li class="pill">Static Analysis</li>
+          </ul>
+          <p class="hero-status">286 tests · Python + C++ · Local-first · M0–M10 complete</p>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <ol class="pipeline">
+            <li class="pipeline-step">SOURCE</li>
+            <li class="pipeline-arrow" aria-hidden="true"></li>
+            <li class="pipeline-step">SEMANTIC UNITS</li>
+            <li class="pipeline-arrow" aria-hidden="true"></li>
+            <li class="pipeline-step">LEXICAL + DENSE</li>
+            <li class="pipeline-arrow" aria-hidden="true"></li>
+            <li class="pipeline-step">HYBRID</li>
+            <li class="pipeline-arrow" aria-hidden="true"></li>
+            <li class="pipeline-step">GRAPH</li>
+            <li class="pipeline-arrow" aria-hidden="true"></li>
+            <li class="pipeline-step">RERANK</li>
+            <li class="pipeline-arrow" aria-hidden="true"></li>
+            <li class="pipeline-step pipeline-step-accent">CONTEXT</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="section" id="architecture" aria-labelledby="arch-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="arch-title">One engine, multiple structural layers</h2>
+          <p class="section-sub">Current implemented architecture — not a roadmap.</p>
+        </header>
+
+        <div class="arch-flow glass-panel">
+          <div class="arch-row">
+            <span class="arch-node">Source Repository</span>
+            <span class="arch-arrow">→</span>
+            <span class="arch-node">LanguageAdapter<br><small>Python OR C++</small></span>
+            <span class="arch-arrow">→</span>
+            <span class="arch-node">Symbols / CodeUnits</span>
+            <span class="arch-arrow">→</span>
+            <span class="arch-node">Static Relations / CodeGraph</span>
+          </div>
+          <div class="arch-row arch-row-storage">
+            <span class="arch-label">Storage</span>
+            <span class="arch-node">SQLite + FTS5</span>
+            <span class="arch-node">FAISS FlatIP</span>
+          </div>
+          <div class="arch-row">
+            <span class="arch-label">Query ladder</span>
+            <span class="arch-ladder">
+              Lexical → Dense → Hybrid → Graph Augmentation → Structured Reranking → Context Compiler
+            </span>
+          </div>
+        </div>
+
+        <div class="arch-maintenance glass-panel">
+          <p class="arch-maintenance-title">Incremental maintenance path</p>
+          <p class="arch-maintenance-flow">
+            SHA-256 ChangeSet → incremental semantic analysis → relation refresh →
+            transactional persistence → selective vector reuse
+          </p>
+        </div>
+
+        <div class="arch-cards">
+          <article class="arch-card" tabindex="0">
+            <h3>Semantic Units</h3>
+            <p class="arch-card-detail">Whole functions/classes/methods — not arbitrary text chunks.</p>
+          </article>
+          <article class="arch-card" tabindex="0">
+            <h3>Hybrid</h3>
+            <p class="arch-card-detail">Lexical + dense rankings fused with reciprocal rank fusion.</p>
+          </article>
+          <article class="arch-card" tabindex="0">
+            <h3>Graph</h3>
+            <p class="arch-card-detail">Depth-1 RESOLVED structural neighbors support candidate ranking.</p>
+          </article>
+          <article class="arch-card" tabindex="0">
+            <h3>Context</h3>
+            <p class="arch-card-detail">Whole CodeUnits packed under an explicit token budget.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Retrieval -->
+    <section class="section" id="retrieval" aria-labelledby="retrieval-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="retrieval-title">The same query, five retrieval strategies</h2>
+          <p class="section-sub query-block" id="retrieval-query">
+            Loading showcase query…
+          </p>
+          <p class="gold-label">Gold target: <code id="retrieval-gold">store.save_order</code></p>
+        </header>
+
+        <div class="mode-cards" id="mode-cards" aria-live="polite">
+          <!-- Filled by JS from calls-02 -->
+        </div>
+
+        <div class="rank-flow glass-panel" id="rank-flow" aria-label="Rank progression for store.save_order">
+          <!-- Filled by JS -->
+        </div>
+        <p class="rank-note">Lower rank is better.</p>
+      </div>
+    </section>
+
+    <!-- Explainability -->
+    <section class="section" id="explainability" aria-labelledby="explain-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="explain-title">Ranking decisions are inspectable</h2>
+          <p class="section-sub">
+            The engine does not only return a similarity score. Structured reranking
+            records the prior graph rank, per-relation RRF contributions, directional
+            evidence, and final rank delta.
+          </p>
+        </header>
+
+        <div class="explain-grid">
+          <div class="terminal-card">
+            <div class="terminal-header">
+              <span class="terminal-label">Captured from <code>aicode search --mode reranked --explain</code></span>
+            </div>
+            <pre class="terminal-body"><code>symbol: store.save_order
+rerank: #3 → #5 (delta -2)
+
+contributions:
+  graph_base  rank=3  rrf=0.015873
+  calls       rank=5  rrf=0.015385
+
+evidence:
+  checkout.finalize_checkout [rank 1]
+  CALLS · seed_to_candidate</code></pre>
+          </div>
+
+          <div class="relation-mini">
+            <div class="relation-diagram">
+              <span class="relation-node">checkout.finalize_checkout</span>
+              <span class="relation-edge">CALLS</span>
+              <span class="relation-node relation-node-target">store.save_order</span>
+            </div>
+            <ul class="relation-ranks">
+              <li>Hybrid rank <strong>2</strong></li>
+              <li>Graph rank <strong>3</strong></li>
+              <li>Reranked rank <strong>5</strong></li>
+            </ul>
+            <p class="relation-note">Intentionally a negative structural example — graph fusion displaced the gold target.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Benchmark -->
+    <section class="section" id="benchmark" aria-labelledby="benchmark-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="benchmark-title">A frozen benchmark, including negative results</h2>
+          <p class="section-sub">24 hand-labeled queries · 11 files · 53 CodeUnits · Python</p>
+          <p class="data-source">Source: committed canonical evaluation artifacts</p>
+        </header>
+
+        <div id="benchmark-error" class="error-card hidden" role="alert"></div>
+
+        <div id="benchmark-content">
+          <div class="metric-tabs" role="tablist" aria-label="Benchmark metric">
+            <button type="button" class="metric-tab active" role="tab" aria-selected="true" data-metric="mrr_at_10">MRR@10</button>
+            <button type="button" class="metric-tab" role="tab" aria-selected="false" data-metric="hit_at_1">Hit@1</button>
+            <button type="button" class="metric-tab" role="tab" aria-selected="false" data-metric="hit_at_5">Hit@5</button>
+            <button type="button" class="metric-tab" role="tab" aria-selected="false" data-metric="hit_at_10">Hit@10</button>
+          </div>
+
+          <div class="chart-panel glass-panel">
+            <div class="chart" id="benchmark-chart" role="img" aria-label="Mode comparison chart"></div>
+          </div>
+
+          <div class="pairwise-grid" id="pairwise-grid"></div>
+
+          <article class="insight-card glass-panel">
+            <h3>What the evaluation found</h3>
+            <p>
+              Dense retrieval performed best in aggregate on the included benchmark.
+              Graph-neighbor fusion often displaced already-correct text results, and the
+              structured reranker sometimes amplified that reordering.
+            </p>
+            <p class="insight-scope">This is benchmark-specific evidence, not a universal claim.</p>
+          </article>
+
+          <div class="methodology-strip">
+            <div class="method-stat">
+              <span class="method-value">24</span>
+              <span class="method-label">Frozen queries</span>
+            </div>
+            <div class="method-stat">
+              <span class="method-value">6 × 4</span>
+              <span class="method-label">Categories</span>
+            </div>
+            <div class="method-stat">
+              <span class="method-value">Top 10</span>
+              <span class="method-label">Evaluation depth</span>
+            </div>
+            <div class="method-stat">
+              <span class="method-value">MiniLM</span>
+              <span class="method-label">Dense model</span>
+            </div>
+            <div class="method-stat">
+              <span class="method-value hash-short" id="benchmark-hash" title="">5125c8fa…611ec2de</span>
+              <span class="method-label">SHA-256 frozen definition</span>
+              <button type="button" class="hash-copy" id="hash-copy" aria-label="Copy full benchmark hash">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Incremental -->
+    <section class="section" id="incremental" aria-labelledby="incremental-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="incremental-title">Recompute what changed — reuse what did not</h2>
+          <p class="section-sub">Avoided semantic-analysis and embedding work — not wall-clock speed claims.</p>
+          <p class="data-source">Source: committed canonical evaluation artifacts</p>
+        </header>
+
+        <div id="incremental-error" class="error-card hidden" role="alert"></div>
+        <div class="incremental-grid" id="incremental-grid"></div>
+      </div>
+    </section>
+
+    <!-- Context -->
+    <section class="section" id="context" aria-labelledby="context-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="context-title">Retrieval ends at an LLM-ready context boundary</h2>
+          <p class="section-sub">
+            Whole CodeUnits · greedy skip-to-fit · overlap suppression · no partial
+            source truncation · <code>simple-lexical-v1</code> is an estimator, not a vendor tokenizer.
+          </p>
+        </header>
+
+        <div class="context-grid">
+          <div class="budget-meter glass-panel">
+            <div class="budget-header">
+              <span>Token budget</span>
+              <span class="budget-value">1000 / 1000</span>
+            </div>
+            <div class="budget-bar" role="progressbar" aria-valuenow="1000" aria-valuemin="0" aria-valuemax="1000" aria-label="Budget used">
+              <div class="budget-fill"></div>
+            </div>
+            <div class="budget-stats">
+              <span>Selected: 10 / 20 candidates</span>
+              <span>Omitted: 10</span>
+            </div>
+          </div>
+
+          <div class="terminal-card">
+            <div class="terminal-header">
+              <span class="terminal-label">Example selected CodeUnits</span>
+              <span class="terminal-note">From final local demo — not live browser computation</span>
+            </div>
+            <pre class="terminal-body"><code>checkout.finalize_checkout
+checkout.compute_order_subtotal
+policies.ChargePolicy
+store.save_order
+notifications.notify_order_confirmed
+validation.validate_order_customer</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Languages -->
+    <section class="section" id="languages" aria-labelledby="lang-title">
+      <div class="container">
+        <header class="section-header">
+          <h2 id="lang-title">Language-specific analysis, shared retrieval infrastructure</h2>
+        </header>
+
+        <div class="lang-grid">
+          <article class="lang-card glass-panel">
+            <h3>Python</h3>
+            <ul class="qname-list">
+              <li><code>users.normalize_email</code></li>
+              <li><code>checkout.finalize_checkout</code></li>
+              <li><code>store.save_order</code></li>
+            </ul>
+            <p class="lang-relations">Relations: CALLS · IMPORTS · INHERITS · CONTAINS</p>
+          </article>
+
+          <article class="lang-card glass-panel">
+            <h3>C++</h3>
+            <ul class="qname-list">
+              <li><code>pricing::calculate(int)</code></li>
+              <li><code>pricing::calculate(double)</code></li>
+              <li><code>ui::Widget::Widget(int)</code></li>
+              <li><code>ui::Widget::~Widget()</code></li>
+              <li><code>ui::Widget::operator==(const Widget&amp;) const</code></li>
+              <li><code>@filelocal:local_a.cpp::&lt;anonymous&gt;::helper()</code></li>
+            </ul>
+            <div class="overload-callout">
+              <span class="overload-label">Overload-safe identity</span>
+              <span class="overload-pair"><code>calculate(int)</code> ≠ <code>calculate(double)</code></span>
+            </div>
+            <p class="lang-limit">Tree-sitter syntax analysis, not compiler-grade C++ semantics. No C++ REFERENCES baseline. Single language per index snapshot.</p>
+          </article>
+        </div>
+
+        <div class="shared-stack glass-panel">
+          <pre class="shared-stack-diagram" aria-label="Shared retrieval stack"><code>Python ─┐
+        ├→ SQLite / FTS → FAISS → Hybrid → Graph → Rerank → Context
+C++ ────┘</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- Scale -->
+    <section class="section section-compact" id="scale" aria-labelledby="scale-title">
+      <div class="container">
+        <h2 id="scale-title" class="visually-hidden">Project scale</h2>
+        <div class="stats-row">
+          <div class="stat"><span class="stat-value">286</span><span class="stat-label">tests</span></div>
+          <div class="stat"><span class="stat-value">2</span><span class="stat-label">languages</span></div>
+          <div class="stat"><span class="stat-value">5</span><span class="stat-label">retrieval modes</span></div>
+          <div class="stat"><span class="stat-value">24</span><span class="stat-label">frozen queries</span></div>
+          <div class="stat"><span class="stat-value">53</span><span class="stat-label">benchmark CodeUnits</span></div>
+          <div class="stat"><span class="stat-value">11</span><span class="stat-label">benchmark files</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Milestones -->
+    <section class="section section-compact" id="milestones" aria-labelledby="milestones-title">
+      <div class="container">
+        <h2 id="milestones-title" class="section-header-small">M0–M10 complete</h2>
+        <ol class="milestone-strip">
+          <li><span class="milestone-id">M0</span> Foundation</li>
+          <li><span class="milestone-id">M1</span> Parsing</li>
+          <li><span class="milestone-id">M2</span> Code Graph</li>
+          <li><span class="milestone-id">M3</span> Lexical Index</li>
+          <li><span class="milestone-id">M4</span> Dense + Hybrid</li>
+          <li><span class="milestone-id">M5</span> Graph Retrieval</li>
+          <li><span class="milestone-id">M6</span> Explainable Reranking</li>
+          <li><span class="milestone-id">M7</span> Context Compiler</li>
+          <li><span class="milestone-id">M8</span> Incremental Index</li>
+          <li><span class="milestone-id">M9</span> C++</li>
+          <li><span class="milestone-id">M10</span> Evaluation</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="section cta-section" aria-labelledby="cta-title">
+      <div class="container cta-inner">
+        <h2 id="cta-title">Built as retrieval infrastructure — not a chatbot.</h2>
+        <div class="cta-buttons">
+          <a class="btn btn-primary" href="https://github.com/simonwen7/graph_code_intelligence" target="_blank" rel="noopener noreferrer">View GitHub</a>
+          <a class="btn btn-secondary" href="#benchmark">Explore Benchmark Results</a>
+          <a class="btn btn-ghost" href="../benchmarks/results/python_retrieval_v1_minilm.json" target="_blank" rel="noopener">View Canonical JSON</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>Graph-Augmented Code Intelligence Engine</p>
+      <p class="footer-meta">Built by Simon Wen · 2026</p>
+    </div>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
