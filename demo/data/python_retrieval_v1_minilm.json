@@ -1,0 +1,1130 @@
+{
+  "benchmark_id": "python-structural-retrieval-v1",
+  "benchmark_version": 1,
+  "benchmark_sha256": "5125c8facaa3344417ca5ea31958f2f6d1a1393a3675963c8e2cbf8d611ec2de",
+  "query_count": 24,
+  "top_k": 10,
+  "provider_id": "sentence-transformers",
+  "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+  "python_version": "3.14.7",
+  "platform": "darwin",
+  "engine_version": "0.1.0",
+  "corpus_fingerprint": "1ac8a3a8dfc3d0bcf6840bfa229a7e44db9512ecdade9a54eeaa7a5ff548d8ef",
+  "aggregate": {
+    "lexical": {
+      "hit_at_1": 0.6666666666666666,
+      "hit_at_5": 0.875,
+      "hit_at_10": 0.875,
+      "mrr_at_10": 0.7430555555555555,
+      "query_count": 24
+    },
+    "dense": {
+      "hit_at_1": 0.7916666666666666,
+      "hit_at_5": 0.875,
+      "hit_at_10": 1.0,
+      "mrr_at_10": 0.8531746031746031,
+      "query_count": 24
+    },
+    "hybrid": {
+      "hit_at_1": 0.6666666666666666,
+      "hit_at_5": 0.875,
+      "hit_at_10": 0.9583333333333334,
+      "mrr_at_10": 0.7604166666666666,
+      "query_count": 24
+    },
+    "graph": {
+      "hit_at_1": 0.25,
+      "hit_at_5": 0.8333333333333334,
+      "hit_at_10": 0.9583333333333334,
+      "mrr_at_10": 0.4970899470899471,
+      "query_count": 24
+    },
+    "reranked": {
+      "hit_at_1": 0.25,
+      "hit_at_5": 0.75,
+      "hit_at_10": 0.9166666666666666,
+      "mrr_at_10": 0.4241236772486772,
+      "query_count": 24
+    }
+  },
+  "by_category": {
+    "lexical": {
+      "lexical": {
+        "hit_at_1": 1.0,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 1.0,
+        "query_count": 6
+      },
+      "dense": {
+        "hit_at_1": 1.0,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 1.0,
+        "query_count": 6
+      },
+      "hybrid": {
+        "hit_at_1": 1.0,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 1.0,
+        "query_count": 6
+      },
+      "graph": {
+        "hit_at_1": 0.16666666666666666,
+        "hit_at_5": 0.8333333333333334,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.45436507936507936,
+        "query_count": 6
+      },
+      "reranked": {
+        "hit_at_1": 0.16666666666666666,
+        "hit_at_5": 0.5,
+        "hit_at_10": 0.8333333333333334,
+        "mrr_at_10": 0.30416666666666664,
+        "query_count": 6
+      }
+    },
+    "behavioral": {
+      "lexical": {
+        "hit_at_1": 0.6666666666666666,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.7638888888888888,
+        "query_count": 6
+      },
+      "dense": {
+        "hit_at_1": 0.6666666666666666,
+        "hit_at_5": 0.8333333333333334,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.7777777777777778,
+        "query_count": 6
+      },
+      "hybrid": {
+        "hit_at_1": 0.5,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.6944444444444445,
+        "query_count": 6
+      },
+      "graph": {
+        "hit_at_1": 0.16666666666666666,
+        "hit_at_5": 0.6666666666666666,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.33955026455026455,
+        "query_count": 6
+      },
+      "reranked": {
+        "hit_at_1": 0.16666666666666666,
+        "hit_at_5": 0.6666666666666666,
+        "hit_at_10": 0.8333333333333334,
+        "mrr_at_10": 0.2935185185185185,
+        "query_count": 6
+      }
+    },
+    "calls": {
+      "lexical": {
+        "hit_at_1": 0.5,
+        "hit_at_5": 0.8333333333333334,
+        "hit_at_10": 0.8333333333333334,
+        "mrr_at_10": 0.625,
+        "query_count": 6
+      },
+      "dense": {
+        "hit_at_1": 0.5,
+        "hit_at_5": 0.6666666666666666,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.6349206349206349,
+        "query_count": 6
+      },
+      "hybrid": {
+        "hit_at_1": 0.5,
+        "hit_at_5": 0.8333333333333334,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.6527777777777778,
+        "query_count": 6
+      },
+      "graph": {
+        "hit_at_1": 0.16666666666666666,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.5277777777777778,
+        "query_count": 6
+      },
+      "reranked": {
+        "hit_at_1": 0.16666666666666666,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.4361111111111111,
+        "query_count": 6
+      }
+    },
+    "inheritance": {
+      "lexical": {
+        "hit_at_1": 0.5,
+        "hit_at_5": 0.6666666666666666,
+        "hit_at_10": 0.6666666666666666,
+        "mrr_at_10": 0.5833333333333334,
+        "query_count": 6
+      },
+      "dense": {
+        "hit_at_1": 1.0,
+        "hit_at_5": 1.0,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 1.0,
+        "query_count": 6
+      },
+      "hybrid": {
+        "hit_at_1": 0.6666666666666666,
+        "hit_at_5": 0.6666666666666666,
+        "hit_at_10": 0.8333333333333334,
+        "mrr_at_10": 0.6944444444444445,
+        "query_count": 6
+      },
+      "graph": {
+        "hit_at_1": 0.5,
+        "hit_at_5": 0.8333333333333334,
+        "hit_at_10": 0.8333333333333334,
+        "mrr_at_10": 0.6666666666666666,
+        "query_count": 6
+      },
+      "reranked": {
+        "hit_at_1": 0.5,
+        "hit_at_5": 0.8333333333333334,
+        "hit_at_10": 1.0,
+        "mrr_at_10": 0.6626984126984127,
+        "query_count": 6
+      }
+    }
+  },
+  "pairwise": [
+    {
+      "left_mode": "graph",
+      "right_mode": "hybrid",
+      "wins": 3,
+      "ties": 7,
+      "losses": 14
+    },
+    {
+      "left_mode": "reranked",
+      "right_mode": "graph",
+      "wins": 2,
+      "ties": 7,
+      "losses": 15
+    }
+  ],
+  "queries": [
+    {
+      "id": "lex-01",
+      "category": "lexical",
+      "query": "normalize_email helper",
+      "relevant_qnames": [
+        "users.normalize_email"
+      ],
+      "showcase": true,
+      "notes": "Preselected lexical showcase before first real run.",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 1,
+        "reranked": 1
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "lex-02",
+      "category": "lexical",
+      "query": "InventoryItem has_stock method",
+      "relevant_qnames": [
+        "inventory.InventoryItem.has_stock"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 2,
+        "reranked": 3
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "lex-03",
+      "category": "lexical",
+      "query": "apply_tax_cents tax_bps",
+      "relevant_qnames": [
+        "pricing.apply_tax_cents"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 3,
+        "reranked": 5
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "lex-04",
+      "category": "lexical",
+      "query": "refund_payment capture_id",
+      "relevant_qnames": [
+        "payments.refund_payment"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 7,
+        "reranked": null
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": false
+      }
+    },
+    {
+      "id": "lex-05",
+      "category": "lexical",
+      "query": "list_order_ids function",
+      "relevant_qnames": [
+        "store.list_order_ids"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 2,
+        "reranked": 6
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": false
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "lex-06",
+      "category": "lexical",
+      "query": "OrderLine class definition",
+      "relevant_qnames": [
+        "orders.OrderLine"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 4,
+        "reranked": 8
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": false
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "beh-01",
+      "category": "behavioral",
+      "query": "convert a raw email string into a lowercase lookup key",
+      "relevant_qnames": [
+        "users.normalize_email"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 1,
+        "reranked": 1
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "beh-02",
+      "category": "behavioral",
+      "query": "increase on-hand warehouse quantity when shipments arrive",
+      "relevant_qnames": [
+        "inventory.restock_units"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 9,
+        "reranked": null
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": false
+      }
+    },
+    {
+      "id": "beh-03",
+      "category": "behavioral",
+      "query": "compute a product line amount from unit price and count",
+      "relevant_qnames": [
+        "pricing.line_total_cents"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 3,
+        "dense": 1,
+        "hybrid": 2,
+        "graph": 3,
+        "reranked": 4
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "beh-04",
+      "category": "behavioral",
+      "query": "compose a welcome message for a newly registered shopper",
+      "relevant_qnames": [
+        "notifications.notify_customer_welcome"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 4,
+        "reranked": 5
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "beh-05",
+      "category": "behavioral",
+      "query": "remove a previously saved purchase from the in-memory store",
+      "relevant_qnames": [
+        "store.delete_order"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 4,
+        "dense": 2,
+        "hybrid": 3,
+        "graph": 7,
+        "reranked": 9
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": false,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "beh-06",
+      "category": "behavioral",
+      "query": "create a purchase container with no line items yet",
+      "relevant_qnames": [
+        "orders.empty_order"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 6,
+        "hybrid": 3,
+        "graph": 5,
+        "reranked": 5
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": false,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": false,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "calls-01",
+      "category": "calls",
+      "query": "which helper reserves stock while preparing an order for checkout",
+      "relevant_qnames": [
+        "validation.reserve_order_inventory"
+      ],
+      "showcase": false,
+      "notes": "Reachable via CALLS from checkout.finalize_checkout.",
+      "ranks": {
+        "lexical": null,
+        "dense": 2,
+        "hybrid": 6,
+        "graph": 2,
+        "reranked": 2
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": false,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "calls-02",
+      "category": "calls",
+      "query": "where does checkout persist the order after a successful charge",
+      "relevant_qnames": [
+        "store.save_order"
+      ],
+      "showcase": true,
+      "notes": "Preselected structural showcase before first real run; CALLS from finalize_checkout.",
+      "ranks": {
+        "lexical": 2,
+        "dense": 1,
+        "hybrid": 2,
+        "graph": 3,
+        "reranked": 5
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "calls-03",
+      "category": "calls",
+      "query": "send the confirmation message assembled during checkout completion",
+      "relevant_qnames": [
+        "notifications.notify_order_confirmed"
+      ],
+      "showcase": false,
+      "notes": "Called from checkout.finalize_checkout.",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 1,
+        "reranked": 1
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "calls-04",
+      "category": "calls",
+      "query": "check whether a shopper account is allowed to place purchases",
+      "relevant_qnames": [
+        "users.is_active_customer"
+      ],
+      "showcase": false,
+      "notes": "Called from validation.validate_order_customer.",
+      "ranks": {
+        "lexical": 1,
+        "dense": 6,
+        "hybrid": 1,
+        "graph": 2,
+        "reranked": 3
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": false,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": false,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "calls-05",
+      "category": "calls",
+      "query": "card authorization invoked when a charge policy approves payment",
+      "relevant_qnames": [
+        "payments.authorize_card"
+      ],
+      "showcase": false,
+      "notes": "Called from policies.ChargePolicy.approve.",
+      "ranks": {
+        "lexical": 4,
+        "dense": 7,
+        "hybrid": 4,
+        "graph": 3,
+        "reranked": 4
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": false,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": false,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "calls-06",
+      "category": "calls",
+      "query": "build the email subject line used when confirming a purchase",
+      "relevant_qnames": [
+        "notifications.build_confirmation_subject"
+      ],
+      "showcase": false,
+      "notes": "Called from notifications.notify_order_confirmed.",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 2,
+        "reranked": 3
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "inh-01",
+      "category": "inheritance",
+      "query": "base class for checkout charge approval policies",
+      "relevant_qnames": [
+        "policies.ChargePolicy"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 1,
+        "reranked": 1
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "inh-02",
+      "category": "inheritance",
+      "query": "charge policy that rejects amounts outside a configured range",
+      "relevant_qnames": [
+        "policies.StrictChargePolicy"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": null,
+        "dense": 1,
+        "hybrid": null,
+        "graph": null,
+        "reranked": 7
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_10": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": false,
+        "reranked": true
+      }
+    },
+    {
+      "id": "inh-03",
+      "category": "inheritance",
+      "query": "prepaid-token charge policy that extends the strict amount bounds",
+      "relevant_qnames": [
+        "policies.PrepaidChargePolicy"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 2,
+        "reranked": 3
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": false,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "inh-04",
+      "category": "inheritance",
+      "query": "root discount policy that returns zero discount by default",
+      "relevant_qnames": [
+        "discounts.DiscountPolicy"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 2,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 1,
+        "reranked": 2
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": false
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "inh-05",
+      "category": "inheritance",
+      "query": "percentage-based discount policy subclass",
+      "relevant_qnames": [
+        "discounts.PercentageDiscount"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": null,
+        "dense": 1,
+        "hybrid": 6,
+        "graph": 2,
+        "reranked": 1
+      },
+      "hit_at_1": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": false,
+        "reranked": true
+      },
+      "hit_at_5": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": false,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": false,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    },
+    {
+      "id": "inh-06",
+      "category": "inheritance",
+      "query": "loyalty discount that adds a bonus percentage on top of a percentage discount",
+      "relevant_qnames": [
+        "discounts.LoyaltyDiscount"
+      ],
+      "showcase": false,
+      "notes": "",
+      "ranks": {
+        "lexical": 1,
+        "dense": 1,
+        "hybrid": 1,
+        "graph": 1,
+        "reranked": 1
+      },
+      "hit_at_1": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_5": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      },
+      "hit_at_10": {
+        "lexical": true,
+        "dense": true,
+        "hybrid": true,
+        "graph": true,
+        "reranked": true
+      }
+    }
+  ]
+}

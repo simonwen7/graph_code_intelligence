@@ -3,8 +3,8 @@
  * Loads committed canonical JSON; no engine execution in browser.
  */
 
-const BENCHMARK_URL = "../benchmarks/results/python_retrieval_v1_minilm.json";
-const INCREMENTAL_URL = "../benchmarks/results/incremental_work_v1.json";
+const BENCHMARK_URL = "./data/python_retrieval_v1_minilm.json";
+const INCREMENTAL_URL = "./data/incremental_work_v1.json";
 
 const MODES = ["lexical", "dense", "hybrid", "graph", "reranked"];
 
@@ -70,7 +70,7 @@ function showError(elementId, message) {
     <strong>Canonical data could not be loaded.</strong>
     ${message}
     <code>python3 -m http.server 8080</code>
-    <span style="display:block;margin-top:0.35rem;font-size:0.8125rem;">Then open http://localhost:8080/demo/</span>
+    <span style="display:block;margin-top:0.35rem;font-size:0.8125rem;">Then open http://localhost:8080/</span>
   `;
 }
 
@@ -349,11 +349,11 @@ async function init() {
     const msg = err instanceof Error ? err.message : String(err);
     showError(
       "benchmark-error",
-      "Run the demo from the repository root with:"
+      "Run the demo from the demo/ directory with:"
     );
     showError(
       "incremental-error",
-      "Run the demo from the repository root with:"
+      "Run the demo from the demo/ directory with:"
     );
     console.error("Dashboard data load failed:", msg);
   }
